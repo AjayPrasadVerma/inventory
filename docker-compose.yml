@@ -1,0 +1,44 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  client:
+    image: ${GHCR_PREFIX}-client:${IMAGE_TAG}
+    container_name: inventory-client-${SLOT}
+    ports:
+      - "${CLIENT_PORT}:3000"
+    environment:
+      - HOSTNAME=0.0.0.0
+      - PORT=3000
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  api:
+    image: ${GHCR_PREFIX}-api:${IMAGE_TAG}
+    container_name: inventory-api-${SLOT}
+    ports:
+      - "${API_PORT}:4000"
+    env_file: /opt/inventory/.env.api
+    environment:
+      - PORT=4000
+      - NODE_ENV=production
+      - GIT_SHA=${IMAGE_TAG}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4000/api/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
