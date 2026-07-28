@@ -1,0 +1,354 @@
+<title>Diamond Box Wala — Software Plan</title>
+<style>
+  :root{
+    --ground:#F3F4F8; --surface:#FFFFFF; --surface-2:#ECEEF5;
+    --ink:#1E2033; --ink-soft:#666E86; --ink-faint:#949BB2;
+    --accent:#A6822E; --accent-soft:#C6A24C;
+    --jewel:#2E3577; --jewel-soft:#4750A0;
+    --line:#E3E4EC; --line-strong:#D3D5E1;
+    --flag:#A6822E; --flagbg:#F5EEDB;
+    --radius:14px;
+    --font-display:"Iowan Old Style","Palatino Linotype","Book Antiqua",Palatino,Georgia,serif;
+    --font-body:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --ground:#14151F; --surface:#1E2030; --surface-2:#262940;
+      --ink:#ECEDF5; --ink-soft:#9AA0B8; --ink-faint:#6E7590;
+      --accent:#D4B15E; --accent-soft:#C6A24C;
+      --jewel:#7C86D6; --jewel-soft:#5F69B8;
+      --line:#2C2E42; --line-strong:#3A3D57;
+      --flag:#D4B15E; --flagbg:#2A2416;
+    }
+  }
+  :root[data-theme="light"]{
+    --ground:#F3F4F8; --surface:#FFFFFF; --surface-2:#ECEEF5;
+    --ink:#1E2033; --ink-soft:#666E86; --ink-faint:#949BB2;
+    --accent:#A6822E; --accent-soft:#C6A24C; --jewel:#2E3577; --jewel-soft:#4750A0;
+    --line:#E3E4EC; --line-strong:#D3D5E1; --flag:#A6822E; --flagbg:#F5EEDB;
+  }
+  :root[data-theme="dark"]{
+    --ground:#14151F; --surface:#1E2030; --surface-2:#262940;
+    --ink:#ECEDF5; --ink-soft:#9AA0B8; --ink-faint:#6E7590;
+    --accent:#D4B15E; --accent-soft:#C6A24C; --jewel:#7C86D6; --jewel-soft:#5F69B8;
+    --line:#2C2E42; --line-strong:#3A3D57; --flag:#D4B15E; --flagbg:#2A2416;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--font-body);
+    line-height:1.62;-webkit-font-smoothing:antialiased;font-size:17px}
+  .page{max-width:840px;margin:0 auto;padding:clamp(20px,4vw,52px) clamp(18px,4vw,40px) 80px}
+  a{color:var(--jewel)}
+
+  /* Cover */
+  .cover{border-bottom:1px solid var(--line);padding-bottom:30px;margin-bottom:14px}
+  .eyebrow{font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.22em;
+    font-size:12px;color:var(--accent);font-weight:600}
+  h1{font-family:var(--font-display);font-weight:600;font-size:clamp(30px,6vw,46px);
+    line-height:1.08;letter-spacing:-.01em;margin:.32em 0 .18em;text-wrap:balance}
+  .lede{font-size:clamp(17px,2.4vw,19px);color:var(--ink-soft);max-width:60ch;margin:.2em 0 1.4em}
+  .meta{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;font-size:13px}
+  .chip{font-family:var(--font-mono);font-size:12px;letter-spacing:.02em;color:var(--ink-soft);
+    background:var(--surface-2);border:1px solid var(--line);border-radius:100px;padding:5px 12px}
+  .chip b{color:var(--ink)}
+
+  /* Flow */
+  .flow-wrap{overflow-x:auto;margin:26px 0 8px;padding-bottom:6px}
+  .flow{display:flex;align-items:stretch;gap:6px;min-width:min-content}
+  .stage{background:var(--surface);border:1px solid var(--line-strong);border-radius:12px;
+    padding:12px 14px;min-width:132px;flex:0 0 auto}
+  .stage .k{font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;
+    letter-spacing:.13em;color:var(--accent)}
+  .stage .v{font-family:var(--font-display);font-size:15.5px;margin-top:3px;line-height:1.2}
+  .stage .s{font-size:12.5px;color:var(--ink-faint);margin-top:2px}
+  .arrow{display:flex;align-items:center;color:var(--accent-soft);font-size:20px;flex:0 0 auto}
+
+  /* Legend */
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin:18px 0 4px;font-size:13.5px;color:var(--ink-soft)}
+  .legend b{color:var(--ink)}
+
+  /* Sections */
+  section{margin-top:44px;scroll-margin-top:20px}
+  .sec-head{display:flex;align-items:baseline;gap:12px;border-bottom:2px solid var(--jewel);
+    padding-bottom:8px;margin-bottom:18px}
+  .sec-num{font-family:var(--font-mono);font-size:13px;color:var(--accent);font-weight:600;
+    letter-spacing:.05em;flex:0 0 auto}
+  h2{font-family:var(--font-display);font-weight:600;font-size:clamp(21px,3.4vw,27px);
+    margin:0;letter-spacing:-.01em;line-height:1.15}
+  h3{font-family:var(--font-body);font-weight:650;font-size:16px;letter-spacing:.01em;
+    margin:26px 0 8px;color:var(--jewel)}
+  p{margin:0 0 12px}
+  .muted{color:var(--ink-soft)}
+
+  /* Tables */
+  .table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);
+    background:var(--surface);margin:12px 0}
+  table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:min-content}
+  th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  thead th{background:var(--surface-2);font-family:var(--font-mono);font-size:11.5px;
+    text-transform:uppercase;letter-spacing:.08em;color:var(--ink-soft);font-weight:600}
+  tbody tr:last-child td{border-bottom:none}
+  td:first-child{font-weight:550}
+  .num{font-variant-numeric:tabular-nums}
+
+  /* Cards / callouts */
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+    padding:16px 18px;margin:14px 0}
+  .callout{background:var(--flagbg);border:1px solid var(--line-strong);border-left:3px solid var(--flag);
+    border-radius:10px;padding:13px 16px;margin:14px 0;font-size:14.5px}
+  .callout .lbl{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;
+    letter-spacing:.1em;color:var(--flag);font-weight:600;display:block;margin-bottom:3px}
+
+  ul.clean{list-style:none;padding:0;margin:10px 0}
+  ul.clean li{position:relative;padding:6px 0 6px 22px;border-bottom:1px solid var(--line)}
+  ul.clean li:last-child{border-bottom:none}
+  ul.clean li::before{content:"";position:absolute;left:2px;top:15px;width:6px;height:6px;
+    border-radius:50%;background:var(--accent)}
+
+  .steps{counter-reset:step;display:grid;gap:12px;margin:14px 0}
+  .step{position:relative;padding-left:44px}
+  .step::before{counter-increment:step;content:counter(step);position:absolute;left:0;top:0;
+    width:30px;height:30px;border-radius:8px;background:#2E3577;color:#fff;
+    font-family:var(--font-mono);font-size:14px;display:grid;place-items:center;font-weight:600}
+  .step h4{margin:2px 0 4px;font-size:15.5px;font-family:var(--font-body);font-weight:650}
+  .step p{margin:0;font-size:14.5px;color:var(--ink-soft)}
+
+  .mono-flow{font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);
+    background:var(--surface-2);border:1px solid var(--line);border-radius:10px;
+    padding:14px 16px;overflow-x:auto;white-space:pre;line-height:1.7}
+
+  .phase-grid{display:grid;gap:12px;grid-template-columns:1fr}
+  @media(min-width:640px){.phase-grid{grid-template-columns:repeat(3,1fr)}}
+  .phase{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .phase .tag{font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--accent)}
+  .phase h4{font-family:var(--font-display);font-size:18px;font-weight:600;margin:6px 0 8px}
+  .phase p{font-size:14px;color:var(--ink-soft);margin:0}
+
+  footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);
+    font-size:13px;color:var(--ink-faint);font-family:var(--font-mono)}
+
+  @media print{body{background:#fff}.flow-wrap,.table-wrap{overflow:visible}}
+</style>
+
+<div class="page">
+
+  <header class="cover">
+    <div class="eyebrow">Diamond Box Wala</div>
+    <h1>Inventory &amp; Ledger Software</h1>
+    <p class="lede">Jewellery box, stand aur products ke liye — raw material se lekar finished maal aur bikri tak, sab ek jagah. Roz ke reports ke saath.</p>
+    <div class="meta">
+      <span class="chip">Plan <b>v1</b></span>
+      <span class="chip">Status: <b>Approval ke liye</b></span>
+      <span class="chip">Frontend <b>Next.js</b></span>
+      <span class="chip">Backend <b>Express</b></span>
+      <span class="chip">DB <b>PostgreSQL</b></span>
+    </div>
+  </header>
+
+  <div class="flow-wrap" role="img" aria-label="Business flow: Vendor se raw material, godown stock, karigar ko job, finished goods, phir sale">
+    <div class="flow">
+      <div class="stage"><div class="k">01 · Kharid</div><div class="v">Vendor</div><div class="s">raw material</div></div>
+      <div class="arrow">›</div>
+      <div class="stage"><div class="k">02 · Stock</div><div class="v">Godown</div><div class="s">raw material</div></div>
+      <div class="arrow">›</div>
+      <div class="stage"><div class="k">03 · Job</div><div class="v">Karigar</div><div class="s">box/stand banwana</div></div>
+      <div class="arrow">›</div>
+      <div class="stage"><div class="k">04 · Ready</div><div class="v">Finished</div><div class="s">goods stock</div></div>
+      <div class="arrow">›</div>
+      <div class="stage"><div class="k">05 · Bikri</div><div class="v">Sale</div><div class="s">retail + wholesale</div></div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span>Is document mein har point pe:</span>
+    <span><b>✓ theek hai</b> ya</span>
+    <span><b>✎ badalna hai</b> mark karein.</span>
+  </div>
+
+  <section id="s1">
+    <div class="sec-head"><span class="sec-num">01</span><h2>Business ek nazar mein</h2></div>
+    <p class="muted">Software ka <b>focus: Inventory + Ledgers</b>. Sale usi ka ek hissa hai.</p>
+    <div class="mono-flow">VENDOR   → raw material (kapda / board / foam …) khareedna
+         → RAW MATERIAL STOCK (godown)
+         → THEKEDAAR / KARIGAR ko material issue  (Job banega)
+         → ready maal wapas → FINISHED GOODS STOCK
+         → SALE (retail + wholesale)</div>
+    <p>Saath-saath <b>vendor ka paisa</b>, <b>karigar ka paisa</b> aur <b>stock</b> — sab ek jagah, roz ke reports ke saath.</p>
+  </section>
+
+  <section id="s2">
+    <div class="sec-head"><span class="sec-num">02</span><h2>Software kaun chalayega</h2></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Role</th><th>Kya kar sakta hai</th></tr></thead>
+      <tbody>
+        <tr><td>Owner</td><td>Sab kuch — entries, reports, rates, delete, settings</td></tr>
+        <tr><td>Staff</td><td>Roz ki entry (purchase, job, sale) + basic stock. Rates / ledger / delete owner ke paas.</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout"><span class="lbl">✎ Confirm</span>Staff ko kaunse reports dikhne chahiye aur kaunse nahi?</div>
+  </section>
+
+  <section id="s3">
+    <div class="sec-head"><span class="sec-num">03</span><h2>Modules (screens)</h2></div>
+    <ul class="clean">
+      <li><b>Masters</b> — Vendors, Karigars, Customers, Raw Materials, Products</li>
+      <li><b>Purchase</b> — vendor se raw material</li>
+      <li><b>Karigar Jobs</b> — material issue → maal receipt → payment</li>
+      <li><b>Sale</b> — retail / wholesale</li>
+      <li><b>Payments</b> — vendor / karigar / customer</li>
+      <li><b>Reports &amp; Dashboard</b></li>
+    </ul>
+  </section>
+
+  <section id="s4">
+    <div class="sec-head"><span class="sec-num">04</span><h2>Screens &amp; fields</h2></div>
+
+    <div class="callout"><span class="lbl">Har Master list mein</span><b>Text search + filter + sort</b> — list badhne pe bhi koi bhi record turant mil jaaye. Vendors: naam/phone/city · Karigars: naam/phone + product type · Customers: mobile/naam + type · Raw Materials: item + category/color/unit · Products: naam + category/variant.</div>
+
+    <h3>Masters — Vendor</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Field</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td>Naam</td><td>required</td></tr>
+        <tr><td>Phone</td><td></td></tr>
+        <tr><td>Address / City</td><td></td></tr>
+        <tr><td>GST No.</td><td>optional</td></tr>
+        <tr><td>Opening balance</td><td>pehle se paisa baaki ho to</td></tr>
+      </tbody>
+    </table></div>
+    <p class="muted">Actions: Add/Edit · Ledger dekho · History (kya-kya khareeda)</p>
+
+    <h3>Masters — Karigar / Thekedaar</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Field</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td>Naam</td><td>required</td></tr>
+        <tr><td>Phone</td><td></td></tr>
+        <tr><td>Kaunse product banata hai</td><td>tag: box / stand / … (dynamic)</td></tr>
+        <tr><td>Opening balance</td><td></td></tr>
+      </tbody>
+    </table></div>
+    <p class="muted">Actions: Add/Edit · Ledger · Jobs history (kitna material gaya, kitna maal aaya)</p>
+
+    <h3>Masters — Customer (pehle se nahi banega)</h3>
+    <div class="callout"><span class="lbl">Khaas baat</span>Alag Customer entry screen nahi. Customer <b>sale ke waqt apne aap</b> ban jaata hai — <b>mobile number uski chaabi</b>. Ek "Customers" list sirf <b>dekhne</b> ke liye (repeat/regular + history).</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Auto-stored</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td>Mobile</td><td>unique — isi se find/create</td></tr>
+        <tr><td>Naam</td><td>optional, sale ke waqt</td></tr>
+        <tr><td>Type</td><td>Retail / Wholesale</td></tr>
+        <tr><td>Udhaar allowed?</td><td>regular customer ke liye</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Masters — Raw Material (dynamic)</h3>
+    <div class="callout"><span class="lbl">Khaas baat</span>Koi bhi naya material, unit ya color owner khud add kar sake — kuch bhi pehle se fix nahi.</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Field</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td>Item naam</td><td>e.g. Kapda, Board, Foam</td></tr>
+        <tr><td>Category</td><td>add-your-own (dynamic)</td></tr>
+        <tr><td>Units</td><td>meter / roll / kilo — jaise vendor se aata hai</td></tr>
+        <tr><td>Colors / Variants</td><td>jitne chahiye</td></tr>
+        <tr><td>Low-stock alert qty</td><td>optional</td></tr>
+      </tbody>
+    </table></div>
+    <p class="muted">Stock inn teen se milkar track hoga: <b>Item + Color + Unit</b> — jaise “Velvet · Red · meter” ka apna stock.</p>
+
+    <h3>Masters — Product (finished goods)</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Field</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td>Product naam</td><td>e.g. Ring Box, Necklace Stand</td></tr>
+        <tr><td>Category</td><td>Box / Stand / … (dynamic)</td></tr>
+        <tr><td>Variants</td><td>Size / Design</td></tr>
+        <tr><td>Low-stock alert qty</td><td>optional</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>Purchase — vendor se raw material</h3>
+    <div class="card">
+      <p style="margin:0 0 8px"><b>Ek entry:</b> Vendor · Date · Bill No. (optional)</p>
+      <p style="margin:0 0 8px">Items table: har row → Item + Color + Unit + Qty + Rate + Amount → Total</p>
+      <p style="margin:0 0 8px">Payment abhi: advance diya (optional) → baaki balance</p>
+      <p style="margin:0" class="muted"><b>Effect:</b> raw stock badhta hai · vendor ledger (amount = dena, payment = kam)</p>
+    </div>
+
+    <h3>Karigar Jobs — software ka dil</h3>
+    <div class="steps">
+      <div class="step"><h4>Job banao (material issue)</h4><p>Job No. (auto) · Karigar · Date · issued material: Item + Color + Unit + Qty</p></div>
+      <div class="step"><h4>Maal receipt (thoda-thoda bhi chalega)</h4><p>Date · Finished product + variant + Qty · bacha material wapas aaya to note</p></div>
+      <div class="step"><h4>Payment</h4><p>Poore order ka thekedaar ko payment (labour)</p></div>
+    </div>
+    <p class="muted"><b>Effect:</b> raw stock kam (issued) · finished stock badhta hai (received) · karigar ledger · <b>“kitna diya vs kitna aaya”</b> apne aap.</p>
+
+    <h3>Sale — retail + wholesale</h3>
+    <div class="card">
+      <p style="margin:0 0 8px"><b>Mobile number</b> daalo → customer auto-find / auto-create · Date · Type: Retail / Wholesale</p>
+      <p style="margin:0 0 8px">Items table: Product + Variant + Qty + <b>Price (har item ke saamne, us waqt haath se)</b> → Amount → Total</p>
+      <p style="margin:0" class="muted"><b>Effect:</b> finished stock kam · Cash default, udhaar sirf regular customer</p>
+    </div>
+
+    <h3>Payments</h3>
+    <ul class="clean">
+      <li><b>Vendor ko</b> — advance / final settlement</li>
+      <li><b>Karigar ko</b> — order payment</li>
+      <li><b>Customer se</b> — udhaar wapas (receipt)</li>
+    </ul>
+  </section>
+
+  <section id="s5">
+    <div class="sec-head"><span class="sec-num">05</span><h2>Reports — aapki priority</h2></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Report</th><th>Kya dikhega</th><th>Filter</th></tr></thead>
+      <tbody>
+        <tr><td>Daily Stock</td><td>Finished goods product-wise qty + raw material qty</td><td>date</td></tr>
+        <tr><td>Raw Material Bacha</td><td>Kitna bacha + kis vendor se aaya tha</td><td>item / vendor</td></tr>
+        <tr><td>Karigar Material</td><td>Kis karigar ko kitna, kaunsa, kab diya; pending kitna</td><td>karigar / date</td></tr>
+        <tr><td>History</td><td>Kisi bhi vendor / karigar ka poora record</td><td>—</td></tr>
+        <tr><td>Ledger</td><td>Vendor &amp; Karigar ledger (opening → transactions → balance)</td><td>date range</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout"><span class="lbl">Dashboard</span>Home screen pe: aaj ki sale · total stock · kis-kis ka paisa baaki (dues) · low-stock alerts. Aage: har report PDF / Excel download.</div>
+  </section>
+
+  <section id="s6">
+    <div class="sec-head"><span class="sec-num">06</span><h2>Banane ka plan</h2></div>
+    <div class="phase-grid">
+      <div class="phase"><div class="tag">Phase 1 · Foundation</div><h4>Base + Masters</h4><p>Setup, login, Masters, Purchase + raw stock, Vendor ledger</p></div>
+      <div class="phase"><div class="tag">Phase 2 · Karigar</div><h4>Job system</h4><p>Issue → receipt, finished stock, karigar ledger, diya-vs-aaya</p></div>
+      <div class="phase"><div class="tag">Phase 3 · Sale</div><h4>Sale + Reports</h4><p>Sale/customer, dashboard aur saare reports</p></div>
+    </div>
+  </section>
+
+  <section id="s7">
+    <div class="sec-head"><span class="sec-num">07</span><h2>Tech stack</h2></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Layer</th><th>Tech</th></tr></thead>
+      <tbody>
+        <tr><td>Frontend</td><td>Next.js + Tailwind + shadcn/ui (computer + mobile)</td></tr>
+        <tr><td>Backend</td><td>Express (Node.js) REST API</td></tr>
+        <tr><td>Database</td><td>PostgreSQL — raw SQL (pg), parameterized + repository layer + migrations</td></tr>
+        <tr><td>Auth</td><td>JWT — Owner / Staff roles</td></tr>
+        <tr><td>Aage</td><td>Mail · WhatsApp · Payment · reminders — alag modules</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section id="s8">
+    <div class="sec-head"><span class="sec-num">08</span><h2>Confirm karne wale points</h2></div>
+    <ul class="clean">
+      <li>Staff ko kaunse reports dikhein?</li>
+      <li>Bikri <b>piece</b> mein ya <b>set / dozen</b> mein bhi?</li>
+      <li>Ek job mein ek product ya multiple ek saath?</li>
+      <li>Stock report mein sirf <b>quantity</b> ya <b>paise wali value</b> bhi?</li>
+      <li>GST / bill number chahiye ya sirf internal record?</li>
+      <li>Kitne users (owner + kitne staff)?</li>
+    </ul>
+    <div class="callout"><span class="lbl">Next</span>In sab pe ✓ / ✎ mil jaaye to Phase 1 coding shuru.</div>
+  </section>
+
+  <footer>Diamond Box Wala · Software Plan v1 · Approval ke liye</footer>
+</div>

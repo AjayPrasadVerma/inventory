@@ -1,0 +1,282 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { api } from "@/lib/api";
+import { useServerList } from "@/lib/use-server-list";
+import { bustCache } from "@/lib/cache";
+import { useAuth } from "@/lib/auth";
+import { qty as fmtQty } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast";
+import { Button } from "@/components/ui/button";
+import { Field, Input, Select, Textarea } from "@/components/ui/field";
+import { Modal } from "@/components/ui/modal";
+import { TagInput } from "@/components/ui/tag-input";
+import { Badge, Card, EmptyState, Spinner } from "@/components/ui/misc";
+import { PageHeader, SearchBar, Pagination } from "@/components/page-parts";
+import { Icon } from "@/components/icons";
+
+interface Item {
+  id: number;
+  name: string;
+  category: string | null;
+  low_stock_qty: string | null;
+  notes: string | null;
+  units: string[];
+  variants: string[];
+  on_hand: { unit: string; qty: number }[];
+}
+
+export default function ItemsPage() {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const router = useRouter();
+  const [search, setSearch] = useState("");
+  const [editing, setEditing] = useState<Item | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [unitOptions, setUnitOptions] = useState<string[]>([]);
+  const [catFilter, setCatFilter] = useState("");
+
+  const filters = useMemo(() => ({ search, sort: "name", category: catFilter }), [search, catFilter]);
+  const { rows, total, loading, page, setPage, pageSize, setPageSize, reload } = useServerList<Item>("/items", filters);
+
+  useEffect(() => {
+    api<{ data: string[] }>("/items/meta/categories").then((r) => setCategories(r.data)).catch(() => {});
+    api<{ data: string[] }>("/items/meta/units").then((r) => setUnitOptions(r.data)).catch(() => {});
+  }, [editing, creating]);
+
+  async function remove(it: Item) {
+    if (!confirm(`Delete "${it.name}"?`)) return;
+    try {
+      await api(`/items/${it.id}`, { method: "DELETE" });
+      toast("Material deleted", "success");
+      bustCache("/items/options");
+      reload();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  }
+
+  return (
+    <div className="mx-auto max-w-6xl">
+      <PageHeader
+        title="Raw Materials"
+        subtitle="Cloth, board, foam… with units and colours."
+        count={total}
+        actions={
+          <Button onClick={() => setCreating(true)}>
+            <Icon.Plus /> <span className="hidden sm:inline">Add Material</span>
+          </Button>
+        }
+      />
+
+      <SearchBar value={search} onChange={setSearch} placeholder="Search materials by name…">
+        <div className="w-full shrink-0 sm:w-48">
+          <Select value={catFilter} onChange={(e) => setCatFilter(e.target.value)}>
+            <option value="">All categories</option>
+            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+          </Select>
+        </div>
+      </SearchBar>
+
+      <Card className="overflow-hidden">
+        {loading ? (
+          <div className="py-16 text-center"><Spinner className="h-6 w-6 text-primary" /></div>
+        ) : rows.length === 0 ? (
+          <EmptyState title="No materials found" hint="Try a different search or category." />
+        ) : (
+          <>
+          <div className="overflow-x-auto">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Category</th>
+                  <th>Units</th>
+                  <th>Colours</th>
+                  <th>Stock</th>
+                  <th className="text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((it) => (
+                  <tr key={it.id} className="align-top">
+                    <td className="font-medium text-ink">{it.name}</td>
+                    <td className="text-muted">{it.category || "—"}</td>
+                    <td>
+                      <div className="flex flex-wrap gap-1">
+                        {it.units.map((u) => <Badge key={u}>{u}</Badge>)}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="flex flex-wrap gap-1">
+                        {it.variants.length
+                          ? it.variants.map((c) => <Badge key={c} tone="accent">{c}</Badge>)
+                          : <span className="text-muted">—</span>}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="flex flex-wrap gap-1">
+                        {it.on_hand.length
+                          ? it.on_hand.map((o, i) => <Badge key={i} tone="neutral">{fmtQty(o.qty)} {o.unit}</Badge>)
+                          : <span className="text-muted">—</span>}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="flex justify-end gap-1.5">
+                        <button onClick={() => router.push(`/items/stock?i=${it.id}`)} className="inline-flex cursor-pointer items-center rounded-md bg-primary-tint px-2.5 text-xs font-medium text-primary transition-colors hover:bg-primary hover:text-primary-fg">Stock</button>
+                        <button onClick={() => setEditing(it)} className="inline-flex cursor-pointer items-center rounded-md bg-surface-2 px-2.5 text-xs font-medium text-ink transition-colors hover:bg-border-strong">Edit</button>
+                        {user?.role === "owner" && (
+                          <button onClick={() => remove(it)} className="inline-flex cursor-pointer items-center rounded-md bg-[color:var(--danger-tint)] px-2.5 text-xs font-medium text-[color:var(--danger)] transition-colors hover:bg-[color:var(--danger)] hover:text-white">Delete</button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pagination page={page} pageSize={pageSize} total={total} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />
+          </>
+        )}
+      </Card>
+
+      {(creating || editing) && (
+        <ItemForm
+          item={editing}
+          categories={categories}
+          unitOptions={unitOptions.length ? unitOptions : ["meter", "roll", "kilo", "piece"]}
+          onClose={() => { setCreating(false); setEditing(null); }}
+          onSaved={() => { setCreating(false); setEditing(null); bustCache("/items/options"); reload(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ItemForm({
+  item,
+  categories,
+  unitOptions,
+  onClose,
+  onSaved,
+}: {
+  item: Item | null;
+  categories: string[];
+  unitOptions: string[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const [name, setName] = useState(item?.name ?? "");
+  const [category, setCategory] = useState(item?.category ?? "");
+  const [lowStock, setLowStock] = useState(item?.low_stock_qty ?? "");
+  const [units, setUnits] = useState<string[]>(item?.units ?? []);
+  const [colors, setColors] = useState<string[]>(item?.variants ?? []);
+  const [notes, setNotes] = useState(item?.notes ?? "");
+  const [openingRows, setOpeningRows] = useState<{ color: string; unit: string; qty: string }[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  function addOpen() { setOpeningRows((r) => [...r, { color: colors[0] ?? "", unit: units[0] ?? "", qty: "" }]); }
+  function setOpen(i: number, k: "color" | "unit" | "qty", v: string) {
+    setOpeningRows((r) => r.map((row, idx) => (idx === i ? { ...row, [k]: v } : row)));
+  }
+  function rmOpen(i: number) { setOpeningRows((r) => r.filter((_, idx) => idx !== i)); }
+
+  async function save() {
+    if (!name.trim()) { toast("Name is required", "error"); return; }
+    if (units.length === 0) { toast("Add at least one unit", "error"); return; }
+    setSaving(true);
+    try {
+      // Opening stock only when creating (a one-time onboarding adjustment).
+      let openingPayload: { color: string | null; unit: string; qty: number }[] | undefined;
+      if (!item) {
+        openingPayload = openingRows
+          .map((r) => ({ color: colors.length > 0 ? (r.color || null) : null, unit: r.unit, qty: Number(r.qty || 0) }))
+          .filter((o) => o.qty > 0 && o.unit);
+      }
+      const body = {
+        name, category: category || null,
+        low_stock_qty: lowStock === "" ? null : Number(lowStock),
+        units, variants: colors, notes,
+        ...(openingPayload && openingPayload.length ? { opening: openingPayload } : {}),
+      };
+      if (item) await api(`/items/${item.id}`, { method: "PUT", body });
+      else await api("/items", { method: "POST", body });
+      toast(item ? "Material updated" : "Material added", "success");
+      onSaved();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={item ? "Edit Material" : "New Raw Material"}
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={save} disabled={saving}>{saving ? <Spinner /> : "Save"}</Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <Field label="Name *">
+          <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus placeholder="Velvet, Board…" />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Category" hint="Type a new one if needed">
+            <Input value={category} onChange={(e) => setCategory(e.target.value)} list="item-cats" />
+            <datalist id="item-cats">
+              {categories.map((c) => <option key={c} value={c} />)}
+            </datalist>
+          </Field>
+          <Field label="Low-stock alert" hint="Warn at this level">
+            <Input value={lowStock} onChange={(e) => setLowStock(e.target.value)} inputMode="decimal" />
+          </Field>
+        </div>
+        <Field label="Units *" hint="meter / roll / kilo — as received">
+          <TagInput value={units} onChange={setUnits} placeholder="meter…" suggestions={unitOptions} />
+        </Field>
+        <Field label="Colors / Variants" hint="Each colour is tracked separately">
+          <TagInput value={colors} onChange={setColors} placeholder="Red, Blue…" />
+        </Field>
+        {!item && (
+          <Field label="Opening stock (optional)" hint="Stock you already have — added once as an adjustment">
+            <div className="flex flex-col gap-2">
+              {openingRows.map((row, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  {colors.length > 0 && (
+                    <div className="w-28 shrink-0">
+                      <Select value={row.color} onChange={(e) => setOpen(i, "color", e.target.value)}>
+                        {colors.map((c) => <option key={c} value={c}>{c}</option>)}
+                      </Select>
+                    </div>
+                  )}
+                  <div className="w-24 shrink-0">
+                    <Select value={row.unit} onChange={(e) => setOpen(i, "unit", e.target.value)}>
+                      {units.map((u) => <option key={u} value={u}>{u}</option>)}
+                    </Select>
+                  </div>
+                  <Input value={row.qty} onChange={(e) => setOpen(i, "qty", e.target.value)} inputMode="decimal" placeholder="Qty" />
+                  <button type="button" onClick={() => rmOpen(i)} aria-label="Remove" className="shrink-0 rounded-md px-2 py-1 text-muted hover:bg-surface-2 hover:text-[color:var(--danger)]">✕</button>
+                </div>
+              ))}
+              <Button variant="outline" size="sm" onClick={addOpen} disabled={units.length === 0}>
+                + Add opening stock
+              </Button>
+            </div>
+          </Field>
+        )}
+        <Field label="Notes">
+          <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} />
+        </Field>
+      </div>
+    </Modal>
+  );
+}

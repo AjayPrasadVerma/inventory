@@ -1,0 +1,166 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---- Royal Indigo & Gold theme tokens ---- */
+:root {
+  --background: #f4f5f9;
+  --surface: #ffffff;
+  --surface-2: #f0f1f7;
+  --ink: #1a1c2e;
+  --muted: #6b7191;
+  --border: #e6e8f0;
+  --border-strong: #d7dae6;
+  --primary: #2e3577;
+  --primary-hover: #262c63;
+  --primary-fg: #ffffff;
+  --primary-tint: #ebecf7;
+  --accent: #a6822e;
+  --accent-tint: #f5eedb;
+  --success: #2e7d5b;
+  --success-tint: #e4f1e9;
+  --warning: #c9871f;
+  --warning-tint: #fbeed6;
+  --danger: #c0442e;
+  --danger-tint: #f7e1dc;
+  --ring: #2e3577;
+  --sidebar: #ffffff;
+  --shadow-xs: 0 1px 2px rgba(20, 22, 55, 0.05);
+  --shadow-sm: 0 1px 2px rgba(20, 22, 55, 0.05), 0 2px 5px rgba(20, 22, 55, 0.05);
+  --shadow-md: 0 4px 14px rgba(20, 22, 55, 0.09);
+}
+
+.dark {
+  --background: #101119;
+  --surface: #1a1c2b;
+  --surface-2: #232639;
+  --ink: #ecedf5;
+  --muted: #979dba;
+  --border: #2a2d42;
+  --border-strong: #363a54;
+  --primary: #4f5ac0;
+  --primary-hover: #5f69c9;
+  --primary-fg: #ffffff;
+  --primary-tint: #23263c;
+  --accent: #d4b15e;
+  --accent-tint: #2a2416;
+  --success: #4fb07f;
+  --success-tint: #172a20;
+  --warning: #e0a03a;
+  --warning-tint: #2c2410;
+  --danger: #e0664f;
+  --danger-tint: #2e1815;
+  --ring: #7c86d6;
+  --sidebar: #15162100;
+  --sidebar: #14151f;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.32);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-fg: var(--primary-fg);
+  --color-primary-tint: var(--primary-tint);
+  --color-accent: var(--accent);
+  --color-accent-tint: var(--accent-tint);
+  --color-success: var(--success);
+  --color-success-tint: var(--success-tint);
+  --color-warning: var(--warning);
+  --color-warning-tint: var(--warning-tint);
+  --color-danger: var(--danger);
+  --color-danger-tint: var(--danger-tint);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    background: var(--background);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+}
+
+/* ---- Reusable professional surfaces ---- */
+.soft-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Dense data tables */
+.data-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+.data-table thead th {
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.data-table thead th:first-child { border-top-left-radius: 12px; }
+.data-table thead th:last-child { border-top-right-radius: 12px; }
+.data-table tbody td {
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--ink);
+  vertical-align: middle;
+}
+/* compact row actions so rows stay short */
+.data-table tbody td button {
+  height: 1.85rem;
+}
+.data-table tbody td button[aria-label] {
+  width: 1.85rem;
+}
+.data-table tbody tr:last-child td { border-bottom: 0; }
+.data-table tbody tr {
+  transition: background 0.12s ease;
+}
+.data-table tbody tr.clickable { cursor: pointer; }
+.data-table tbody tr:hover td {
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+}
+.data-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+/* Keep column headers visible when the table scrolls inside its own container */
+.data-table.sticky-head thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
