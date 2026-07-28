@@ -164,3 +164,10 @@
   top: 0;
   z-index: 1;
 }
+
+/* Login form entrance */
+@keyframes acx-fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.acx-fade-up { animation: acx-fade-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) both; }

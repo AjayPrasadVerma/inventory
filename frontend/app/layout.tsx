@@ -4,8 +4,17 @@ import { AuthProvider } from "@/lib/auth";
 import { ToastProvider } from "@/components/ui/toast";
 
 export const metadata: Metadata = {
-  title: "Diamond Box Wala",
-  description: "Inventory & ledger — jewellery box, stand & products",
+  title: "Acronix — Inventory & Ledger",
+  description: "Inventory & ledger — raw material, karigar jobs, products & sales",
+  icons: {
+    icon: [
+      { url: "/favicon/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/favicon/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+    ],
+    shortcut: "/favicon/favicon.ico",
+    apple: [{ url: "/favicon/apple-touch-icon.png", sizes: "180x180" }],
+  },
+  manifest: "/favicon/site.webmanifest",
 };
 
 // Set theme class before paint to avoid a flash of the wrong theme.
