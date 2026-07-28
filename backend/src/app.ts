@@ -17,6 +17,12 @@ import { vendorsRouter } from './modules/vendors/vendors.routes.js';
 export function createApp() {
   const app = express();
 
+  // Behind Nginx (production): trust the first proxy hop so req.ip is the real
+  // client IP — required for the login rate-limiter to key per user, not per proxy.
+  if (process.env.NODE_ENV === 'production') {
+    app.set('trust proxy', 1);
+  }
+
   app.use(cors({ origin: env.corsOrigins, credentials: true }));
   app.use(express.json({ limit: '256kb' }));
 
