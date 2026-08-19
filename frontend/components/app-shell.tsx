@@ -8,6 +8,7 @@ import { cn, roleLabel } from "@/lib/utils";
 import { Button } from "./ui/button";
 import { Icon } from "./icons";
 import { UserMenu } from "./user-menu";
+import { CommandPalette, SearchTrigger } from "./command-palette";
 
 type NavItem = { href: string; label: string; icon: (p: React.SVGProps<SVGSVGElement>) => React.ReactNode };
 
@@ -68,7 +69,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        <div className="ml-auto flex shrink-0 items-center gap-2 lg:ml-0">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <SearchTrigger />
           <UserMenu name={user?.name} role={user?.role} onLogout={logout} />
         </div>
       </header>
@@ -114,6 +116,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       )}
 
       <main className="min-h-0 flex-1 overflow-y-auto px-3 py-5 sm:px-4 lg:px-5">{children}</main>
+
+      <CommandPalette />
     </div>
   );
 }
