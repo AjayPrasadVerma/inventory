@@ -189,6 +189,10 @@ export const purchasesRepo = {
         [id],
       );
       await client.query(`DELETE FROM purchase_items WHERE purchase_id = $1`, [id]);
+      // Money paid against this bill goes with it, so the vendor's Outstanding is
+      // reversed too. (The FK is ON DELETE SET NULL, which would otherwise leave
+      // these behind as untraceable on-account payments.) Mirrors jobsRepo.deleteJob.
+      await client.query(`DELETE FROM payments WHERE purchase_id = $1`, [id]);
       await client.query(`DELETE FROM purchases WHERE id = $1`, [id]);
       return true;
     });

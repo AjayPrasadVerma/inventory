@@ -101,7 +101,7 @@ export default function DashboardPage() {
             <Hero label="Finished Goods in Stock" value={fmtQty(finishedTotal)} hint={`across ${data?.products ?? 0} products`} icon={<Icon.Product />} tone="primary" href="/reports/finished-stock" />
             <Hero label="Raw Materials" value={data?.rawMaterials ?? 0} hint={`${rawLines} stock lines`} icon={<Icon.Item />} tone="accent" href="/reports/raw-stock" />
             <Hero label="Low / Oversold Stock" value={data?.lowStockCount ?? 0} hint={data && data.lowStockCount > 0 ? "Needs restocking" : "All healthy"} icon={<Icon.Report />} tone={data && data.lowStockCount > 0 ? "danger" : "success"} href="/reports/low-stock" />
-            <Hero label="Open Jobs" value={data?.openJobs ?? 0} hint="Material out with karigars" icon={<Icon.Job />} tone="warning" href="/jobs" />
+            <Hero label="Open Jobs" value={data?.openJobs ?? 0} hint="Material out with karigars" icon={<Icon.Job />} tone="warning" href="/karigars" />
           </div>
 
           {/* Category overview */}
@@ -116,9 +116,8 @@ export default function DashboardPage() {
           {/* Today */}
           <div>
             <SectionTitle>Today</SectionTitle>
-            <div className="grid grid-cols-3 gap-3">
-              <Mini label="Purchases" value={data?.purchasesToday ?? 0} hint="Recorded" icon={<Icon.Purchase />} tone="primary" href="/purchases" />
-              <Mini label="Sales" value={data?.salesToday ?? 0} hint="Billed" icon={<Icon.Sale />} tone="success" href="/sales" />
+            <div className="grid grid-cols-2 gap-3">
+              <Mini label="Purchases" value={data?.purchasesToday ?? 0} hint="Recorded" icon={<Icon.Purchase />} tone="primary" href="/vendors" />
               <Mini label="Material Issued" value={data?.issuesToday ?? 0} hint="To karigars" icon={<Icon.Karigar />} tone="warning" href="/reports/karigar-issued" />
             </div>
           </div>
@@ -126,10 +125,9 @@ export default function DashboardPage() {
           {/* Quick actions */}
           <div>
             <SectionTitle>Quick actions</SectionTitle>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <QuickLink href="/sales" title="New Sale" hint="Bill a customer" icon={<Icon.Sale />} tone="success" />
-              <QuickLink href="/purchases" title="New Purchase" hint="Record raw material from a vendor" icon={<Icon.Purchase />} tone="primary" />
-              <QuickLink href="/jobs" title="New Job" hint="Issue material to a karigar" icon={<Icon.Job />} tone="warning" />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <QuickLink href="/vendors" title="New Purchase" hint="Open a vendor and add a purchase" icon={<Icon.Purchase />} tone="primary" />
+              <QuickLink href="/karigars" title="Issue Material" hint="Open a karigar and issue material" icon={<Icon.Job />} tone="warning" />
             </div>
           </div>
         </div>

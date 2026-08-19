@@ -117,12 +117,12 @@
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 13px;
+  font-size: 14px;
 }
 .data-table thead th {
   background: var(--surface-2);
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -171,3 +171,21 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 .acx-fade-up { animation: acx-fade-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* Modal / dialog open + close transitions — plain fade only.
+   No transform: a scale/translate on the panel makes its `sticky` footer
+   recalculate mid-animation, which reads as the buttons dropping into place. */
+@keyframes acx-overlay-in  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes acx-overlay-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes acx-panel-in  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes acx-panel-out { from { opacity: 1; } to { opacity: 0; } }
+.acx-overlay-in  { animation: acx-overlay-in  0.15s ease-out both; }
+.acx-overlay-out { animation: acx-overlay-out 0.12s ease-in both; }
+.acx-panel-in    { animation: acx-panel-in  0.15s ease-out both; }
+.acx-panel-out   { animation: acx-panel-out 0.12s ease-in both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .acx-fade-up,
+  .acx-overlay-in, .acx-overlay-out,
+  .acx-panel-in, .acx-panel-out { animation: none; }
+}

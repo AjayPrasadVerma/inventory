@@ -68,7 +68,7 @@ karigarsRouter.get(
 karigarsRouter.get(
   '/:id/ledger',
   asyncHandler(async (req, res) => {
-    const ledger = await karigarsRepo.ledger(parseId(req.params.id));
+    const ledger = await karigarsRepo.khata(parseId(req.params.id));
     if (!ledger) throw new AppError(404, 'Karigar not found');
     res.json({ data: ledger });
   }),

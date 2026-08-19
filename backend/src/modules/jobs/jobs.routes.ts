@@ -20,12 +20,20 @@ const receiptSchema = z.object({
   qty: z.coerce.number().positive('Quantity must be greater than 0').max(1_000_000),
 });
 
+/** Money paid to the karigar as part of an issue/receive step — linked to that job. */
+const jobPaymentSchema = z.object({
+  amount: z.coerce.number().positive().max(1_000_000_000),
+  method: z.string().trim().max(30).optional().nullable(),
+  note: z.string().trim().max(2000).optional().nullable(),
+});
+
 const createSchema = z.object({
   karigar_id: z.coerce.number().int().positive(),
   job_date: pastOrTodayDateSchema.optional().nullable(),
   expected_note: z.string().trim().max(2000).optional().nullable(),
   notes: z.string().trim().max(2000).optional().nullable(),
   issues: z.array(issueSchema).min(1, 'Issue at least one material').max(200, 'Too many items'),
+  payment: jobPaymentSchema.optional().nullable(),
 });
 
 const listSchema = z.object({
@@ -92,11 +100,12 @@ jobsRouter.post(
       receipts: z.array(receiptSchema).max(200, 'Too many items').default([]),
       returns: z.array(issueSchema).max(200, 'Too many items').default([]),
       on_date: pastOrTodayDateSchema.optional().nullable(),
+      payment: jobPaymentSchema.optional().nullable(),
     }).parse(req.body);
-    if (body.receipts.length === 0 && body.returns.length === 0) {
-      throw new AppError(400, 'Receive or return at least one item');
+    if (body.receipts.length === 0 && body.returns.length === 0 && !body.payment) {
+      throw new AppError(400, 'Receive or return at least one item, or record a payment');
     }
-    await jobsRepo.addReceipt(id, body.receipts, body.returns, body.on_date);
+    await jobsRepo.addReceipt(id, body.receipts, body.returns, body.on_date, body.payment ?? null);
     res.json({ ok: true });
   }),
 );
