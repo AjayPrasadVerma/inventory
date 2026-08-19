@@ -12,6 +12,7 @@ import { productsRouter } from './modules/products/products.routes.js';
 import { purchasesRouter } from './modules/purchases/purchases.routes.js';
 import { reportsRouter } from './modules/reports/reports.routes.js';
 import { salesRouter } from './modules/sales/sales.routes.js';
+import { searchRouter } from './modules/search/search.routes.js';
 import { vendorsRouter } from './modules/vendors/vendors.routes.js';
 
 export function createApp() {
@@ -39,6 +40,7 @@ export function createApp() {
   app.use('/api/jobs', jobsRouter);
   app.use('/api/sales', salesRouter);
   app.use('/api/customers', customersRouter);
+  app.use('/api/search', searchRouter);
   app.use('/api/payments', paymentsRouter);
   app.use('/api/reports', reportsRouter);
 

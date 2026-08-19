@@ -39,6 +39,14 @@ export default function ProductsPage() {
   const [categories, setCategories] = useState<string[]>([]);
   const [catFilter, setCatFilter] = useState("");
 
+  // The command palette links here as `?new=1`, so open the create form on arrival.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("new") !== "1") return;
+    window.history.replaceState(null, "", window.location.pathname);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- opens the form for a ?new=1 deep link
+    setCreating(true);
+  }, []);
+
   const filters = useMemo(() => ({ search, sort: "name", category: catFilter }), [search, catFilter]);
   const { rows, total, loading, page, setPage, pageSize, setPageSize, reload } = useServerList<Product>("/products", filters);
 
