@@ -15,6 +15,7 @@ const vendorSchema = z.object({
   city: z.string().trim().optional().nullable(),
   gst_no: z.string().trim().optional().nullable(),
   notes: z.string().trim().optional().nullable(),
+  opening_balance: z.coerce.number().min(-1_000_000_000).max(1_000_000_000).optional().default(0),
 });
 
 const listSchema = z.object({
@@ -55,12 +56,13 @@ vendorsRouter.get(
   }),
 );
 
+// Bill-wise khata: each purchase paired with the payments made against it.
 vendorsRouter.get(
   '/:id/ledger',
   asyncHandler(async (req, res) => {
-    const ledger = await vendorsRepo.ledger(parseId(req.params.id));
-    if (!ledger) throw new AppError(404, 'Vendor not found');
-    res.json({ data: ledger });
+    const khata = await vendorsRepo.khata(parseId(req.params.id));
+    if (!khata) throw new AppError(404, 'Vendor not found');
+    res.json({ data: khata });
   }),
 );
 

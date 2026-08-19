@@ -1,39 +1,76 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { cachedGet } from "@/lib/cache";
+import { bustCache, cachedGet } from "@/lib/cache";
+import { useAuth } from "@/lib/auth";
 import { formatDate, qty as fmtQty, rupees, todayISO } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
-import { Input, Select, Label } from "@/components/ui/field";
+import { Input, Label } from "@/components/ui/field";
 import { Combobox, type ComboOption } from "@/components/ui/combobox";
-import { DateField } from "@/components/ui/date-field";
-import { Badge, Card, EmptyState, Spinner } from "@/components/ui/misc";
-import { PageHeader, StatCard, StatStrip } from "@/components/page-parts";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
+import { Card, EmptyState, Spinner } from "@/components/ui/misc";
+import { ConfirmDialog } from "@/components/ui/confirm";
+import { PageHeader } from "@/components/page-parts";
 import { Icon } from "@/components/icons";
+import { KarigarForm, type Karigar } from "@/components/karigar-form";
+import { PayKarigarModal } from "@/components/pay-karigar-modal";
+import { JobModal } from "@/components/job-modal";
+import { ReceiveGoodsModal } from "@/components/receive-goods-modal";
 
-interface KarigarLite { id: number; name: string; phone: string | null; total_paid: string }
-interface LedgerItem { name: string; variant: string | null; qty: string }
-interface LedgerData {
-  totalPaid: number;
-  entries: { date: string; type: "job" | "payment"; ref: string; paid: number; items?: LedgerItem[] }[];
+interface KarigarLite { id: number; name: string; phone: string | null }
+interface Issued { name: string; color: string | null; unit: string; qty: string }
+interface Received { name: string; variant: string | null; qty: string }
+interface PayLine { id: number; date: string; method: string | null; amount: number }
+interface Job {
+  id: number;
+  date: string;
+  status: "open" | "closed";
+  note: string | null;
+  issued: Issued[];
+  received: Received[];
+  returned: Issued[];
+  payments: PayLine[];
+  paid: number;
+}
+interface Unlinked { id: number; date: string; method: string | null; amount: number; note: string | null }
+interface Khata {
+  jobs: Job[];
+  unlinked: Unlinked[];
+  totals: { jobs: number; open: number; paid: number };
 }
 
+type PendingDelete =
+  | { kind: "job"; id: number; label: string }
+  | { kind: "payment"; id: number; label: string };
+
 export default function KarigarAccountPage() {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const router = useRouter();
+  const isOwner = user?.role === "owner";
+
   const [karigars, setKarigars] = useState<KarigarLite[]>([]);
   const [karigarId, setKarigarId] = useState("");
-  const [ledger, setLedger] = useState<LedgerData | null>(null);
+  const [karigar, setKarigar] = useState<Karigar | null>(null);
+  const [khata, setKhata] = useState<Khata | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // filters — default to the current month (1st → today)
-  const [from, setFrom] = useState(() => todayISO().slice(0, 8) + "01");
+  // Opens on the current month — the range a shop looks at most.
+  const [from, setFrom] = useState(() => `${todayISO().slice(0, 8)}01`);
   const [to, setTo] = useState(() => todayISO());
-  const [type, setType] = useState<"all" | "job" | "payment">("all");
   const [search, setSearch] = useState("");
 
-  // Load the karigar list once and honour a ?k=<id> pre-selection (set inside the
-  // resolved promise so no state is set synchronously during the effect).
+  const [editKarigar, setEditKarigar] = useState(false);
+  const [newJob, setNewJob] = useState(false);
+  const [receiveJob, setReceiveJob] = useState<number | null>(null);
+  const [payModal, setPayModal] = useState<{ jobId: number; ref: string } | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
   useEffect(() => {
     cachedGet<{ data: KarigarLite[] }>("/karigars/options")
       .then((r) => {
@@ -44,150 +81,380 @@ export default function KarigarAccountPage() {
       .catch((e) => setError((e as Error).message));
   }, []);
 
-  const loadAccount = useCallback((id: string) => {
-    let alive = true;
+  const loadAccount = useCallback(async (id: string) => {
     setLoading(true);
     setError(null);
-    api<{ data: LedgerData }>(`/karigars/${id}/ledger`)
-      .then((l) => { if (alive) setLedger(l.data); })
-      .catch((e) => { if (alive) setError((e as Error).message); })
-      .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
+    try {
+      const [k, kh] = await Promise.all([
+        api<{ data: Karigar }>(`/karigars/${id}`),
+        api<{ data: Khata }>(`/karigars/${id}/ledger`),
+      ]);
+      setKarigar(k.data);
+      setKhata(kh.data);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (!karigarId) return; // render guards on !karigarId, so stale data is never shown
-    // Keep the URL shareable/refresh-safe without a full navigation.
+    if (!karigarId) return;
     window.history.replaceState(null, "", `?k=${karigarId}`);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- loads account data after a karigar change
-    return loadAccount(karigarId);
+    loadAccount(karigarId);
   }, [karigarId, loadAccount]);
+
+  const refresh = useCallback(() => { if (karigarId) loadAccount(karigarId); }, [karigarId, loadAccount]);
 
   const karigarOptions = useMemo<ComboOption[]>(
     () => karigars.map((k) => ({ value: String(k.id), label: k.name, sublabel: k.phone || undefined })),
     [karigars],
   );
-  const hasFilter = !!(from || to || type !== "all" || search.trim());
+
   const s = search.trim().toLowerCase();
-  const statsReady = !loading && !!ledger;
+  const hasFilter = !!(from || to || s);
 
-  // KPIs derived straight from the ledger — no running balance anymore, just
-  // counts of jobs / payments and the total money paid to this karigar.
-  const stats = useMemo(() => {
-    if (!ledger) return null;
-    let jobs = 0, payments = 0;
-    for (const e of ledger.entries) {
-      if (e.type === "job") jobs++;
-      else payments++;
-    }
-    return { jobs, payments };
-  }, [ledger]);
-
-  const shownLedger = useMemo(() => {
-    if (!ledger) return [];
-    return ledger.entries.filter((e) =>
-      (!from || e.date >= from) && (!to || e.date <= to) &&
-      (type === "all" || e.type === type) &&
-      (!s || e.ref.toLowerCase().includes(s)),
+  /** Jobs shown after the date/search filter. Totals stay all-time so Total paid
+   *  always matches the karigar's real figure on the list page. */
+  const jobs = useMemo(() => {
+    const all = khata?.jobs ?? [];
+    return all.filter((j) =>
+      (!from || j.date >= from) && (!to || j.date <= to) &&
+      (!s ||
+        String(j.id).includes(s) ||
+        (j.note ?? "").toLowerCase().includes(s) ||
+        j.issued.some((i) => i.name.toLowerCase().includes(s) || (i.color ?? "").toLowerCase().includes(s)) ||
+        j.received.some((r) => r.name.toLowerCase().includes(s) || (r.variant ?? "").toLowerCase().includes(s)) ||
+        j.payments.some((p) => (p.method ?? "").toLowerCase().includes(s))),
     );
-  }, [ledger, from, to, type, s]);
+  }, [khata, from, to, s]);
 
-  function clearFilters() { setFrom(""); setTo(""); setType("all"); setSearch(""); }
+  const unlinked = useMemo(() => {
+    const all = khata?.unlinked ?? [];
+    return all.filter((u) =>
+      (!from || u.date >= from) && (!to || u.date <= to) &&
+      (!s || (u.method ?? "").toLowerCase().includes(s) || (u.note ?? "").toLowerCase().includes(s)),
+    );
+  }, [khata, from, to, s]);
+
+  async function confirmDelete() {
+    if (!pendingDelete) return;
+    setDeleteLoading(true);
+    try {
+      const path = pendingDelete.kind === "job" ? `/jobs/${pendingDelete.id}` : `/payments/${pendingDelete.id}`;
+      await api(path, { method: "DELETE" });
+      toast(pendingDelete.kind === "job" ? "Job deleted — stock reversed." : "Payment deleted", "success");
+      setPendingDelete(null);
+      refresh();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      setDeleteLoading(false);
+    }
+  }
+
+  const payCount = (khata?.jobs ?? []).reduce((n, j) => n + j.payments.length, 0) + (khata?.unlinked.length ?? 0);
 
   return (
-    <div className="w-full pb-16">
-      <PageHeader backHref="/karigars" title="Karigar Account" subtitle="Ledger and work history in one place." />
+    <div className="w-full pb-10">
+      <PageHeader
+        backHref="/karigars"
+        title={karigar?.name ?? "Karigar account"}
+        subtitle={karigar ? [karigar.phone, karigar.product_types?.join(", ")].filter(Boolean).join(" · ") || undefined : undefined}
+        actions={karigarId ? (
+          <>
+            <Button variant="outline" onClick={() => setEditKarigar(true)} title="Karigar details"><Icon.Edit /> <span className="hidden lg:inline">Details</span></Button>
+            <Button onClick={() => setNewJob(true)}><Icon.Plus /> <span className="hidden sm:inline">Issue material</span></Button>
+          </>
+        ) : undefined}
+      />
 
-      {/* KPIs on top — fill in once a karigar is selected */}
-      <StatStrip>
-        <StatCard label="Total Jobs" value={statsReady && stats ? String(stats.jobs) : "—"} icon={<Icon.Job />} />
-        <StatCard label="Payments" value={statsReady && stats ? String(stats.payments) : "—"} icon={<Icon.Job />} />
-        <StatCard label="Total Paid" value={statsReady && ledger ? rupees(ledger.totalPaid) : "—"} icon={<Icon.Ledger />} />
-      </StatStrip>
-
-      {/* Toolbar: karigar picker + filters in one row */}
-      <Card className="p-4">
+      <Card className="p-3">
         <div className="flex flex-wrap items-end gap-3">
-          <div className="w-full sm:w-60">
+          <div className="w-full sm:w-56">
             <Label>Karigar</Label>
             <Combobox options={karigarOptions} value={karigarId} onChange={setKarigarId} placeholder="Search karigar…" ariaLabel="Karigar" />
           </div>
-          <div className="w-36">
-            <Label>From</Label>
-            <DateField value={from} onChange={setFrom} disabled={!karigarId} ariaLabel="From date" />
+          <div className="w-full sm:w-[19rem]">
+            <Label>Date range</Label>
+            <DateRangePicker from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} disabled={!karigarId} />
           </div>
-          <div className="w-36">
-            <Label>To</Label>
-            <DateField value={to} onChange={setTo} min={from || undefined} disabled={!karigarId} ariaLabel="To date" />
-          </div>
-          <div className="w-36">
-            <Label>Type</Label>
-            <Select value={type} onChange={(e) => setType(e.target.value as typeof type)} disabled={!karigarId}>
-              <option value="all">All entries</option>
-              <option value="job">Jobs</option>
-              <option value="payment">Payments</option>
-            </Select>
-          </div>
-          <div className="min-w-[10rem] flex-1">
+          <div className="min-w-[12rem] flex-1">
             <Label>Search</Label>
-            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Bill no. / reference…" disabled={!karigarId} />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Job / material / product…" disabled={!karigarId} />
           </div>
-          {hasFilter && <Button variant="outline" size="sm" onClick={clearFilters}>Clear filters</Button>}
+          {hasFilter && <Button variant="outline" onClick={() => { setFrom(""); setTo(""); setSearch(""); }}>Clear</Button>}
         </div>
       </Card>
 
-      {error && <p className="mt-4 text-sm text-[color:var(--danger)]">{error}</p>}
+      {error && <p className="mt-3 text-sm text-[color:var(--danger)]">{error}</p>}
 
       {!karigarId ? (
-        <Card className="mt-4"><EmptyState title="Select a karigar" hint="Pick a karigar above to see its ledger and work history." /></Card>
+        <Card className="mt-3"><EmptyState title="Select a karigar" hint="Pick a karigar above to open its khata." /></Card>
       ) : loading ? (
-        <div className="py-16 text-center"><Spinner className="h-6 w-6 text-primary" /></div>
-      ) : ledger ? (
-        <section className="mt-4">
-            <div className="mb-2 flex items-baseline justify-between">
-              <h2 className="text-sm font-semibold text-ink">Ledger &amp; history</h2>
-              <span className="text-sm">
-                <span className="text-muted">Total paid: </span>
-                <span className="font-semibold text-ink tabular-nums">{rupees(ledger.totalPaid)}</span>
-              </span>
-            </div>
-            <div className="overflow-hidden rounded-xl border border-border">
-              <div className="max-h-[62vh] overflow-auto">
-                <table className="data-table sticky-head min-w-[880px]">
-                  <thead>
-                    <tr>
-                      <th>Date</th><th>Type</th><th>Details</th><th>Goods made</th>
-                      <th className="num">Paid</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {shownLedger.map((e, i) => (
-                      <tr key={i}>
-                        <td className="whitespace-nowrap text-muted">{formatDate(e.date)}</td>
-                        <td>
-                          <Badge tone={e.type === "job" ? "accent" : "success"}>
-                            {e.type === "job" ? "Job" : "Payment"}
-                          </Badge>
+        <div className="py-20 text-center"><Spinner className="h-6 w-6 text-primary" /></div>
+      ) : khata ? (
+        <>
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            <Tile label="Total jobs" value={String(khata.totals.jobs)} tone="accent" />
+            <Tile label="Open jobs" value={String(khata.totals.open)} tone={khata.totals.open > 0 ? "warning" : "muted"} />
+            <Tile label="Total paid" value={rupees(khata.totals.paid)} tone="success" />
+          </div>
+
+          {/* ── Job-wise khata: what went out (diya) against what came back (aaya) ── */}
+          <div className="mt-2 overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-xs)]">
+            <div className="max-h-[calc(100vh-300px)] min-h-[16rem] overflow-auto">
+              <table className="w-full min-w-[1040px] border-separate border-spacing-0 text-base">
+                <thead className="sticky top-0 z-10">
+                  <tr>
+                    <th colSpan={3} className="border-b border-border-strong bg-surface-2 px-4 py-2.5 text-left text-sm font-semibold text-[color:var(--accent)]">
+                      Material issued
+                    </th>
+                    <th className="border-b border-l-2 border-border-strong border-l-border-strong bg-surface-2 px-4 py-2.5 text-left text-sm font-semibold text-[color:var(--success)]">
+                      Goods received &amp; payment
+                    </th>
+                  </tr>
+                  <tr className="text-xs uppercase tracking-[0.09em] text-muted">
+                    <th className="w-28 whitespace-nowrap border-b border-border-strong bg-surface px-4 py-2 text-left font-semibold">Date</th>
+                    <th className="w-32 whitespace-nowrap border-b border-border-strong bg-surface px-4 py-2 text-left font-semibold">Job</th>
+                    <th className="border-b border-border-strong bg-surface px-4 py-2 text-left font-semibold">Diya — raw material</th>
+                    <th className="w-[40%] whitespace-nowrap border-b border-l-2 border-border-strong border-l-border-strong bg-surface px-4 py-2 text-left font-semibold">
+                      Aaya — goods · paid
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {jobs.map((j) => {
+                    const done = j.status === "closed";
+                    const cell = `border-b border-border-strong px-4 py-2.5 align-top ${done ? "bg-[color:var(--success-tint)]" : ""}`;
+                    return (
+                      <tr key={j.id}>
+                        <td className={`${cell} whitespace-nowrap font-mono text-sm font-semibold text-muted`}>{formatDate(j.date)}</td>
+                        <td className={cell}>
+                          <span className="whitespace-nowrap font-mono text-[15px] font-semibold text-ink">#{j.id}</span>
+                          {j.note && <span className="mt-0.5 block max-w-[9rem] truncate text-[12px] text-muted" title={j.note}>{j.note}</span>}
+                          <span className="mt-1 flex gap-3 text-[13px]">
+                            <button onClick={() => router.push(`/jobs/detail?j=${j.id}`)} className="cursor-pointer text-muted underline-offset-2 hover:text-ink hover:underline">Open</button>
+                            {isOwner && (
+                              <button onClick={() => setPendingDelete({ kind: "job", id: j.id, label: `Job #${j.id}` })} className="cursor-pointer text-muted underline-offset-2 hover:text-[color:var(--danger)] hover:underline">Delete</button>
+                            )}
+                          </span>
                         </td>
-                        <td className="text-ink">{e.ref}</td>
-                        <td className="text-muted">
-                          {e.type === "job" && e.items && e.items.length
-                            ? e.items.map((it) => `${it.name}${it.variant ? ` (${it.variant})` : ""} · ${fmtQty(it.qty)}`).join(", ")
-                            : "—"}
+                        <td className={`${cell} text-[15px] font-medium`}>
+                          {j.issued.length === 0 ? <span className="text-muted">—</span> : (
+                            <>
+                              {j.issued.length > 3 && (
+                                <span className="mb-1.5 inline-block rounded-full bg-surface-2 px-2 py-0.5 text-[11.5px] font-semibold uppercase tracking-wide text-muted">
+                                  {j.issued.length} items
+                                </span>
+                              )}
+                              <div className={j.issued.length > 3 ? "columns-2 gap-x-8" : undefined}>
+                                {j.issued.map((it, k) => (
+                                  <span key={k} className="block break-inside-avoid">
+                                    {it.name}
+                                    {it.color ? <span className="text-muted"> ({it.color})</span> : null}
+                                    <span className="text-muted"> · {fmtQty(it.qty)} {it.unit}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                          {j.returned.length > 0 && (
+                            <span className="mt-1.5 block text-[13px] text-muted">
+                              Returned: {j.returned.map((r) => `${r.name}${r.color ? ` (${r.color})` : ""} · ${fmtQty(r.qty)} ${r.unit}`).join(", ")}
+                            </span>
+                          )}
                         </td>
-                        <td className="num">{e.type === "payment" ? rupees(e.paid) : "—"}</td>
+                        <td className={`border-b border-l-2 border-border-strong border-l-border-strong px-4 py-2.5 align-top ${done ? "bg-[color:var(--success-tint)]" : ""}`}>
+                          <ReturnBox
+                            done={done}
+                            received={j.received}
+                            payments={j.payments}
+                            paid={j.paid}
+                            onReceive={() => setReceiveJob(j.id)}
+                            onPay={() => setPayModal({ jobId: j.id, ref: `Job #${j.id}` })}
+                            onDeletePay={isOwner ? (p) => setPendingDelete({ kind: "payment", id: p.id, label: `${rupees(p.amount)} on ${formatDate(p.date)}` }) : undefined}
+                          />
+                        </td>
                       </tr>
-                    ))}
-                    {shownLedger.length === 0 && (
-                      <tr><td colSpan={5} className="py-6 text-center text-muted">No transactions{hasFilter ? " match these filters" : " yet"}.</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                    );
+                  })}
+
+                  {/* Lump sums not tied to any job — still part of what the karigar was paid. */}
+                  {unlinked.map((u) => (
+                    <tr key={`u${u.id}`}>
+                      <td className="border-b border-border-strong px-4 py-2.5 align-top font-mono text-sm font-semibold text-muted">{formatDate(u.date)}</td>
+                      <td className="border-b border-border-strong px-4 py-2.5 align-top font-mono text-[15px] text-muted">—</td>
+                      <td className="border-b border-border-strong px-4 py-2.5 align-top text-[15px] font-medium text-muted">
+                        Payment not tied to a job{u.note ? ` · ${u.note}` : ""}
+                      </td>
+                      <td className="border-b border-l-2 border-border-strong border-l-border-strong px-4 py-2.5 align-top">
+                        <PayRow line={{ id: u.id, date: u.date, method: u.method, amount: u.amount }}
+                          onDelete={isOwner ? () => setPendingDelete({ kind: "payment", id: u.id, label: `${rupees(u.amount)} on ${formatDate(u.date)}` }) : undefined} />
+                      </td>
+                    </tr>
+                  ))}
+
+                  {jobs.length === 0 && unlinked.length === 0 && (
+                    <tr><td colSpan={4} className="px-4 py-10 text-center text-muted">
+                      No jobs{hasFilter ? " match these filters" : " yet"}.
+                    </td></tr>
+                  )}
+                </tbody>
+
+                <tfoot>
+                  <tr>
+                    <td colSpan={3} className="border-t border-border-strong bg-surface-2 px-4 py-2.5 text-[12.5px] font-semibold uppercase tracking-wide text-muted">
+                      {jobs.length < khata.jobs.length ? `${jobs.length} of ${khata.jobs.length}` : khata.jobs.length} jobs · {payCount} payments
+                    </td>
+                    <td className="border-l-2 border-t border-border-strong border-l-border-strong bg-surface-2 px-4 py-2.5" />
+                  </tr>
+                </tfoot>
+              </table>
             </div>
-            <p className="mt-1.5 text-xs text-muted">{shownLedger.length} of {ledger.entries.length} transactions shown</p>
-          </section>
+          </div>
+        </>
       ) : null}
+
+      {/* ── Modals ───────────────────────────────────────────────────── */}
+      {editKarigar && karigar && (
+        <KarigarForm
+          karigar={karigar}
+          onClose={() => setEditKarigar(false)}
+          onSaved={() => { setEditKarigar(false); bustCache("/karigars/options"); refresh(); }}
+        />
+      )}
+
+      {newJob && karigar && (
+        <JobModal
+          karigarId={karigar.id}
+          karigarName={karigar.name}
+          onClose={() => setNewJob(false)}
+          onDone={() => { setNewJob(false); refresh(); }}
+        />
+      )}
+
+      {receiveJob !== null && karigar && (
+        <ReceiveGoodsModal
+          jobId={receiveJob}
+          karigarName={karigar.name}
+          onClose={() => setReceiveJob(null)}
+          onDone={() => { setReceiveJob(null); refresh(); }}
+        />
+      )}
+
+      {payModal && karigar && (
+        <PayKarigarModal
+          karigarId={karigar.id}
+          karigarName={karigar.name}
+          jobId={payModal.jobId}
+          againstRef={payModal.ref}
+          onClose={() => setPayModal(null)}
+          onDone={() => { setPayModal(null); refresh(); }}
+        />
+      )}
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title={pendingDelete?.kind === "job" ? "Delete job?" : "Delete payment?"}
+        message={
+          pendingDelete?.kind === "job"
+            ? <>Deleting <span className="font-semibold text-ink">{pendingDelete.label}</span> will reverse the material issued, any goods received, and any payment made for it. This cannot be undone.</>
+            : <>Delete the payment of <span className="font-semibold text-ink">{pendingDelete?.label}</span>? This cannot be undone.</>
+        }
+        confirmLabel="Delete"
+        tone="danger"
+        loading={deleteLoading}
+        onConfirm={confirmDelete}
+        onClose={() => setPendingDelete(null)}
+      />
+    </div>
+  );
+}
+
+/** What came back for one job: goods made, then what was paid for it. */
+function ReturnBox({
+  done, received, payments, paid, onReceive, onPay, onDeletePay,
+}: {
+  done: boolean;
+  received: Received[];
+  payments: PayLine[];
+  paid: number;
+  onReceive: () => void;
+  onPay: () => void;
+  onDeletePay?: (p: PayLine) => void;
+}) {
+  return (
+    <div className="flex h-full w-full flex-col gap-2">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[12.5px] font-semibold uppercase tracking-wide text-muted">Goods made</span>
+        <span className="flex items-center gap-2">
+          {done && <span className="text-[13px] font-bold uppercase tracking-wide text-[color:var(--success)]">Complete</span>}
+          <button onClick={onReceive} className="cursor-pointer rounded-md bg-primary-tint px-2.5 py-1 text-[13px] font-medium text-primary transition-colors hover:bg-primary hover:text-primary-fg">Receive</button>
+        </span>
+      </div>
+
+      {received.length === 0 ? (
+        <span className="text-sm font-medium text-muted">Nothing received yet</span>
+      ) : (
+        <div className="flex flex-col gap-0.5">
+          {received.map((r, i) => (
+            <span key={i} className="text-[15px] font-medium">
+              {r.name}
+              {r.variant ? <span className="text-muted"> ({r.variant})</span> : null}
+              <span className="text-muted"> · {fmtQty(r.qty)} pcs</span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[12.5px] font-semibold uppercase tracking-wide text-muted">Paid</span>
+        <span className="flex items-baseline gap-2">
+          <span className="font-mono text-base font-bold tabular-nums text-[color:var(--success)]">{rupees(paid)}</span>
+          <button onClick={onPay} className="cursor-pointer rounded-md bg-[color:var(--success-tint)] px-2.5 py-1 text-[13px] font-medium text-[color:var(--success)] transition-colors hover:bg-[color:var(--success)] hover:text-white">Pay</button>
+        </span>
+      </div>
+
+      {payments.length > 0 && (
+        <div className="flex flex-col gap-0.5">
+          {payments.map((p) => (
+            <PayRow key={p.id} line={p} onDelete={onDeletePay ? () => onDeletePay(p) : undefined} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** date · mode · amount — one payment. Delete stays hidden until hover to keep it quiet. */
+function PayRow({ line, onDelete }: { line: PayLine; onDelete?: () => void }) {
+  return (
+    <div className="group grid grid-cols-[auto_1fr_auto_auto] items-baseline gap-2.5">
+      <span className="font-mono text-[13.5px] font-semibold text-muted">{formatDate(line.date)}</span>
+      <span className="text-sm font-medium text-ink">{line.method || "—"}</span>
+      <span className="font-mono text-[14.5px] font-bold tabular-nums text-[color:var(--success)]">{rupees(line.amount)}</span>
+      {onDelete ? (
+        <button onClick={onDelete} aria-label="Delete payment" className="cursor-pointer text-[13px] text-muted opacity-0 transition-opacity hover:text-[color:var(--danger)] group-hover:opacity-100">✕</button>
+      ) : <span />}
+    </div>
+  );
+}
+
+const TILE_TONE: Record<string, string> = {
+  accent: "bg-[color:var(--accent-tint)] text-[color:var(--accent)]",
+  success: "bg-[color:var(--success-tint)] text-[color:var(--success)]",
+  warning: "bg-[color:var(--warning-tint)] text-[color:var(--warning)]",
+  muted: "bg-surface-2 text-muted",
+};
+
+function Tile({ label, value, tone }: { label: string; value: string; tone: keyof typeof TILE_TONE }) {
+  return (
+    <div className={`flex items-baseline justify-between gap-2 rounded-lg border border-border px-3 py-1.5 ${TILE_TONE[tone]}`}>
+      <span className="truncate text-[13px] font-semibold uppercase tracking-wide">{label}</span>
+      <span className="shrink-0 text-[17px] font-semibold tabular-nums text-ink">{value}</span>
     </div>
   );
 }

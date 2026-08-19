@@ -117,31 +117,48 @@ export const karigarsRepo = {
 
   /** Ledger: jobs (with finished goods received) and payments made, plus total paid.
    *  Job entries carry the finished goods RECEIVED for that job so the UI can show WHAT was produced. */
-  async ledger(id: number): Promise<{
-    totalPaid: number;
-    entries: {
+  /** Job-wise khata: what was ISSUED to the karigar (diya) against what came BACK
+   *  (aaya), plus the money paid for that job. This is the owner's core karigar
+   *  question — "kitna diya vs kitna maal aaya" — so the two sides sit per job.
+   *  `unlinked` holds lump sums not tied to any job; they still count toward total paid. */
+  async khata(id: number): Promise<{
+    jobs: {
+      id: number;
       date: string;
-      type: 'job' | 'payment';
-      ref: string;
+      status: 'open' | 'closed';
+      note: string | null;
+      issued: { name: string; color: string | null; unit: string; qty: string }[];
+      received: { name: string; variant: string | null; qty: string }[];
+      returned: { name: string; color: string | null; unit: string; qty: string }[];
+      payments: { id: number; date: string; method: string | null; amount: number }[];
       paid: number;
-      items?: { name: string; variant: string | null; qty: string }[];
     }[];
+    unlinked: { id: number; date: string; method: string | null; amount: number; note: string | null }[];
+    totals: { jobs: number; open: number; paid: number };
   } | null> {
     const karigar = await this.findById(id);
     if (!karigar) return null;
 
-    const jobs = await query<{ job_date: string; id: number }>(
-      `SELECT id, job_date FROM jobs WHERE karigar_id = $1`,
+    const jobs = (await query<{ id: number; job_date: string; status: 'open' | 'closed'; expected_note: string | null }>(
+      `SELECT id, job_date, status, expected_note FROM jobs
+       WHERE karigar_id = $1 ORDER BY job_date DESC, id DESC`,
       [id],
-    );
-    const payments = await query<{ pay_date: string; id: number; amount: string; ref_note: string | null }>(
-      `SELECT id, pay_date, amount, ref_note FROM payments
-       WHERE party_type = 'karigar' AND party_id = $1 AND direction = 'paid'`,
-      [id],
-    );
+    )).rows;
 
-    // Finished goods received for every job of this karigar, grouped by job id.
-    const receiptRows = await query<{ job_id: number; name: string; variant: string | null; qty: string }>(
+    // Material issued to the karigar, per job.
+    const issueRows = (await query<{ job_id: number; name: string; color: string | null; unit: string; qty: string }>(
+      `SELECT ji.job_id, i.name, iv.color, ji.unit, ji.qty
+       FROM job_issues ji
+       JOIN jobs j ON j.id = ji.job_id
+       JOIN items i ON i.id = ji.item_id
+       LEFT JOIN item_variants iv ON iv.id = ji.variant_id
+       WHERE j.karigar_id = $1
+       ORDER BY ji.id`,
+      [id],
+    )).rows;
+
+    // Finished goods returned by the karigar, per job.
+    const receiptRows = (await query<{ job_id: number; name: string; variant: string | null; qty: string }>(
       `SELECT jr.job_id, p.name, pv.variant, jr.qty
        FROM job_receipts jr
        JOIN jobs j ON j.id = jr.job_id
@@ -150,26 +167,78 @@ export const karigarsRepo = {
        WHERE j.karigar_id = $1
        ORDER BY jr.id`,
       [id],
-    );
-    const itemsByJob = new Map<number, { name: string; variant: string | null; qty: string }[]>();
-    for (const r of receiptRows.rows) {
-      const list = itemsByJob.get(r.job_id) ?? [];
-      list.push({ name: r.name, variant: r.variant, qty: r.qty });
-      itemsByJob.set(r.job_id, list);
+    )).rows;
+
+    // Left-over raw material sent back (recorded as a negative-reason movement on the job).
+    const returnRows = (await query<{ job_id: number; name: string; color: string | null; unit: string; qty: string }>(
+      `SELECT sm.ref_id AS job_id, i.name, iv.color, sm.unit, ABS(sm.qty) AS qty
+       FROM stock_movements sm
+       JOIN jobs j ON j.id = sm.ref_id
+       JOIN items i ON i.id = sm.item_id
+       LEFT JOIN item_variants iv ON iv.id = sm.variant_id
+       WHERE sm.reason = 'job_return' AND j.karigar_id = $1
+       ORDER BY sm.id`,
+      [id],
+    )).rows;
+
+    const payRows = (await query<{
+      id: number; pay_date: string; amount: string; method: string | null;
+      ref_note: string | null; job_id: number | null;
+    }>(
+      `SELECT id, pay_date, amount, method, ref_note, job_id FROM payments
+       WHERE party_type = 'karigar' AND party_id = $1 AND direction = 'paid'
+       ORDER BY pay_date, id`,
+      [id],
+    )).rows;
+
+    function groupBy<T extends { job_id: number }>(rows: T[]): Map<number, T[]> {
+      const m = new Map<number, T[]>();
+      for (const r of rows) {
+        const list = m.get(r.job_id) ?? [];
+        list.push(r);
+        m.set(r.job_id, list);
+      }
+      return m;
+    }
+    const issuedBy = groupBy(issueRows);
+    const receivedBy = groupBy(receiptRows);
+    const returnedBy = groupBy(returnRows);
+
+    const paysBy = new Map<number, typeof payRows>();
+    const unlinked: { id: number; date: string; method: string | null; amount: number; note: string | null }[] = [];
+    for (const pay of payRows) {
+      if (pay.job_id == null) {
+        unlinked.push({ id: pay.id, date: pay.pay_date, method: pay.method, amount: Number(pay.amount), note: pay.ref_note });
+        continue;
+      }
+      const list = paysBy.get(pay.job_id) ?? [];
+      list.push(pay);
+      paysBy.set(pay.job_id, list);
     }
 
-    const entries: { date: string; type: 'job' | 'payment'; ref: string; paid: number; items?: { name: string; variant: string | null; qty: string }[] }[] = [];
-    for (const j of jobs.rows) {
-      entries.push({ date: j.job_date, type: 'job', ref: `Job #${j.id}`, paid: 0, items: itemsByJob.get(j.id) ?? [] });
-    }
-    let totalPaid = 0;
-    for (const pay of payments.rows) {
-      const amt = Number(pay.amount);
-      totalPaid += amt;
-      entries.push({ date: pay.pay_date, type: 'payment', ref: pay.ref_note ?? `Payment #${pay.id}`, paid: amt });
-    }
-    entries.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-    return { totalPaid, entries };
+    const out = jobs.map((j) => {
+      const payments = (paysBy.get(j.id) ?? []).map((p) => ({
+        id: p.id, date: p.pay_date, method: p.method, amount: Number(p.amount),
+      }));
+      return {
+        id: j.id,
+        date: j.job_date,
+        status: j.status,
+        note: j.expected_note,
+        issued: (issuedBy.get(j.id) ?? []).map((r) => ({ name: r.name, color: r.color, unit: r.unit, qty: r.qty })),
+        received: (receivedBy.get(j.id) ?? []).map((r) => ({ name: r.name, variant: r.variant, qty: r.qty })),
+        returned: (returnedBy.get(j.id) ?? []).map((r) => ({ name: r.name, color: r.color, unit: r.unit, qty: r.qty })),
+        payments,
+        paid: payments.reduce((n, p) => n + p.amount, 0),
+      };
+    });
+
+    const paidTotal = payRows.reduce((n, p) => n + Number(p.amount), 0);
+    return {
+      jobs: out,
+      unlinked,
+      totals: { jobs: jobs.length, open: jobs.filter((j) => j.status === 'open').length, paid: paidTotal },
+    };
   },
 
   /** Full work history for a karigar: all jobs + aggregated material given vs goods received. */

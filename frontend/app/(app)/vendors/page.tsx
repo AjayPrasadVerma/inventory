@@ -3,28 +3,19 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { rupees } from "@/lib/utils";
 import { useServerList } from "@/lib/use-server-list";
 import { bustCache } from "@/lib/cache";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Textarea } from "@/components/ui/field";
-import { Modal } from "@/components/ui/modal";
+import { VendorForm, type Vendor } from "@/components/vendor-form";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { Card, EmptyState, Spinner } from "@/components/ui/misc";
-import { PageHeader, SearchBar, Pagination } from "@/components/page-parts";
+import { PageHeader, Pagination } from "@/components/page-parts";
 import { Icon } from "@/components/icons";
 
-interface Vendor {
-  id: number;
-  name: string;
-  phone: string | null;
-  address: string | null;
-  city: string | null;
-  gst_no: string | null;
-  notes: string | null;
-  balance: string;
-}
-
+// Vendor shape + add/edit form live in components/vendor-form.tsx (shared with the account page).
 export default function VendorsPage() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -32,36 +23,54 @@ export default function VendorsPage() {
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<Vendor | null>(null);
   const [creating, setCreating] = useState(false);
+  const [deleting, setDeleting] = useState<Vendor | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const filters = useMemo(() => ({ search, sort: "name" }), [search]);
   const { rows, total, loading, page, setPage, pageSize, setPageSize, reload } = useServerList<Vendor>("/vendors", filters);
 
-  async function remove(v: Vendor) {
-    if (!confirm(`Delete "${v.name}"?`)) return;
+  async function confirmDelete() {
+    if (!deleting) return;
+    setDeleteLoading(true);
     try {
-      await api(`/vendors/${v.id}`, { method: "DELETE" });
+      await api(`/vendors/${deleting.id}`, { method: "DELETE" });
       toast("Vendor deleted", "success");
       bustCache("/vendors/options");
+      setDeleting(null);
       reload();
     } catch (e) {
       toast((e as Error).message, "error");
+    } finally {
+      setDeleteLoading(false);
     }
   }
 
   return (
-    <div className="mx-auto max-w-6xl">
+    <div className="w-full">
       <PageHeader
         title="Vendors"
         subtitle="Raw material suppliers and their accounts."
         count={total}
         actions={
-          <Button onClick={() => setCreating(true)}>
-            <Icon.Plus /> <span className="hidden sm:inline">Add Vendor</span>
-          </Button>
+          <>
+            <div className="relative w-48 sm:w-72 lg:w-96">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
+              </span>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search name / phone / city…"
+                aria-label="Search vendors"
+                className="h-10 w-full rounded-lg border border-border bg-surface pl-9 pr-3 text-sm text-ink shadow-xs outline-none placeholder:text-muted focus:border-primary"
+              />
+            </div>
+            <Button onClick={() => setCreating(true)}>
+              <Icon.Plus /> <span className="hidden sm:inline">Add Vendor</span>
+            </Button>
+          </>
         }
       />
-
-      <SearchBar value={search} onChange={setSearch} placeholder="Search by name / phone / city…" />
 
       <Card className="overflow-hidden">
         {loading ? (
@@ -76,31 +85,48 @@ export default function VendorsPage() {
             <table className="data-table">
               <thead>
                 <tr>
+                  <th className="w-14 num">S.No.</th>
                   <th>Name</th>
-                  <th>City</th>
                   <th>Phone</th>
+                  <th>City</th>
+                  <th>Address</th>
                   <th>Notes</th>
+                  <th className="num">Outstanding</th>
                   <th className="text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((v) => (
-                    <tr key={v.id}>
-                      <td className="font-medium text-ink">{v.name}</td>
-                      <td className="text-muted">{v.city || "—"}</td>
-                      <td className="text-muted">{v.phone || "—"}</td>
-                      <td className="max-w-[22rem] truncate text-muted">{v.notes || "—"}</td>
-                      <td>
+                {rows.map((v, i) => {
+                  const due = Number(v.balance) || 0;
+                  return (
+                    <tr
+                      key={v.id}
+                      className="clickable"
+                      onClick={() => router.push(`/vendors/account?v=${v.id}`)}
+                      title="Open account"
+                    >
+                      <td className="num text-muted">{(page - 1) * pageSize + i + 1}</td>
+                      <td className="font-semibold text-ink">{v.name}</td>
+                      <td>{v.phone || <span className="text-muted">—</span>}</td>
+                      <td>{v.city || <span className="text-muted">—</span>}</td>
+                      <td className="max-w-[16rem] truncate">{v.address || <span className="text-muted">—</span>}</td>
+                      <td className="max-w-[16rem] truncate">{v.notes || <span className="text-muted">—</span>}</td>
+                      <td className="num font-medium">
+                        {due > 0
+                          ? <span className="text-[color:var(--warning)]">{rupees(due)}</span>
+                          : <span className="text-muted">{rupees(due)}</span>}
+                      </td>
+                      <td onClick={(e) => e.stopPropagation()}>
                         <div className="flex justify-end gap-1.5">
-                          <button onClick={() => router.push(`/vendors/account?v=${v.id}`)} className="inline-flex cursor-pointer items-center rounded-md bg-primary-tint px-2.5 text-xs font-medium text-primary transition-colors hover:bg-primary hover:text-primary-fg">Account</button>
                           <button onClick={() => setEditing(v)} className="inline-flex cursor-pointer items-center rounded-md bg-surface-2 px-2.5 text-xs font-medium text-ink transition-colors hover:bg-border-strong">Edit</button>
                           {user?.role === "owner" && (
-                            <button onClick={() => remove(v)} className="inline-flex cursor-pointer items-center rounded-md bg-[color:var(--danger-tint)] px-2.5 text-xs font-medium text-[color:var(--danger)] transition-colors hover:bg-[color:var(--danger)] hover:text-white">Delete</button>
+                            <button onClick={() => setDeleting(v)} className="inline-flex cursor-pointer items-center rounded-md bg-[color:var(--danger-tint)] px-2.5 text-xs font-medium text-[color:var(--danger)] transition-colors hover:bg-[color:var(--danger)] hover:text-white">Delete</button>
                           )}
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -125,89 +151,16 @@ export default function VendorsPage() {
         />
       )}
 
+      <ConfirmDialog
+        open={!!deleting}
+        title="Delete vendor?"
+        message={<>Are you sure you want to delete <span className="font-semibold text-ink">{deleting?.name}</span>? This action cannot be undone.</>}
+        confirmLabel="Delete"
+        tone="danger"
+        loading={deleteLoading}
+        onConfirm={confirmDelete}
+        onClose={() => setDeleting(null)}
+      />
     </div>
   );
 }
-
-function VendorForm({
-  vendor,
-  onClose,
-  onSaved,
-}: {
-  vendor: Vendor | null;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const { toast } = useToast();
-  const [form, setForm] = useState({
-    name: vendor?.name ?? "",
-    phone: vendor?.phone ?? "",
-    city: vendor?.city ?? "",
-    address: vendor?.address ?? "",
-    gst_no: vendor?.gst_no ?? "",
-    notes: vendor?.notes ?? "",
-  });
-  const [saving, setSaving] = useState(false);
-
-  function set<K extends keyof typeof form>(k: K, v: string) {
-    setForm((f) => ({ ...f, [k]: v }));
-  }
-
-  async function save() {
-    if (!form.name.trim()) {
-      toast("Name is required", "error");
-      return;
-    }
-    setSaving(true);
-    try {
-      if (vendor) await api(`/vendors/${vendor.id}`, { method: "PUT", body: form });
-      else await api("/vendors", { method: "POST", body: form });
-      toast(vendor ? "Vendor updated" : "Vendor added", "success");
-      onSaved();
-    } catch (e) {
-      toast((e as Error).message, "error");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title={vendor ? "Edit Vendor" : "New Vendor"}
-      footer={
-        <>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={save} disabled={saving}>
-            {saving ? <Spinner /> : "Save"}
-          </Button>
-        </>
-      }
-    >
-      <div className="flex flex-col gap-4">
-        <Field label="Name *">
-          <Input value={form.name} onChange={(e) => set("name", e.target.value)} autoFocus />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Phone">
-            <Input value={form.phone} onChange={(e) => set("phone", e.target.value)} inputMode="numeric" />
-          </Field>
-          <Field label="City">
-            <Input value={form.city} onChange={(e) => set("city", e.target.value)} />
-          </Field>
-        </div>
-        <Field label="Address">
-          <Input value={form.address} onChange={(e) => set("address", e.target.value)} />
-        </Field>
-        <Field label="GST No.">
-          <Input value={form.gst_no} onChange={(e) => set("gst_no", e.target.value)} />
-        </Field>
-        <Field label="Notes">
-          <Textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} />
-        </Field>
-      </div>
-    </Modal>
-  );
-}
-

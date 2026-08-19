@@ -13,7 +13,8 @@ import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { Modal } from "@/components/ui/modal";
 import { TagInput } from "@/components/ui/tag-input";
 import { Badge, Card, EmptyState, Spinner } from "@/components/ui/misc";
-import { PageHeader, SearchBar, Pagination } from "@/components/page-parts";
+import { PageHeader, Pagination } from "@/components/page-parts";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { Icon } from "@/components/icons";
 
 interface Product {
@@ -33,6 +34,8 @@ export default function ProductsPage() {
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<Product | null>(null);
   const [creating, setCreating] = useState(false);
+  const [deleting, setDeleting] = useState<Product | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
   const [catFilter, setCatFilter] = useState("");
 
@@ -43,39 +46,54 @@ export default function ProductsPage() {
     api<{ data: string[] }>("/products/meta/categories").then((r) => setCategories(r.data)).catch(() => {});
   }, [editing, creating]);
 
-  async function remove(p: Product) {
-    if (!confirm(`Delete "${p.name}"?`)) return;
+  async function confirmDelete() {
+    if (!deleting) return;
+    setDeleteLoading(true);
     try {
-      await api(`/products/${p.id}`, { method: "DELETE" });
+      await api(`/products/${deleting.id}`, { method: "DELETE" });
       toast("Product deleted", "success");
       bustCache("/products/options");
+      setDeleting(null);
       reload();
     } catch (e) {
       toast((e as Error).message, "error");
+    } finally {
+      setDeleteLoading(false);
     }
   }
 
   return (
-    <div className="mx-auto max-w-6xl">
+    <div className="w-full">
       <PageHeader
         title="Products"
         subtitle="Finished goods with size / design variants."
         count={total}
         actions={
-          <Button onClick={() => setCreating(true)}>
-            <Icon.Plus /> <span className="hidden sm:inline">Add Product</span>
-          </Button>
+          <>
+            <div className="relative w-40 sm:w-60 lg:w-80">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
+              </span>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search products by name…"
+                aria-label="Search products by name"
+                className="h-10 w-full rounded-lg border border-border bg-surface pl-9 pr-3 text-sm text-ink shadow-xs outline-none placeholder:text-muted focus:border-primary"
+              />
+            </div>
+            <div className="w-36 sm:w-44">
+              <Select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} aria-label="Category">
+                <option value="">All categories</option>
+                {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+              </Select>
+            </div>
+            <Button onClick={() => setCreating(true)}>
+              <Icon.Plus /> <span className="hidden sm:inline">Add Product</span>
+            </Button>
+          </>
         }
       />
-
-      <SearchBar value={search} onChange={setSearch} placeholder="Search products by name…">
-        <div className="w-full shrink-0 sm:w-48">
-          <Select value={catFilter} onChange={(e) => setCatFilter(e.target.value)}>
-            <option value="">All categories</option>
-            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
-          </Select>
-        </div>
-      </SearchBar>
 
       <Card className="overflow-hidden">
         {loading ? (
@@ -88,18 +106,26 @@ export default function ProductsPage() {
             <table className="data-table">
               <thead>
                 <tr>
+                  <th className="w-14 num">S.No.</th>
                   <th>Name</th>
                   <th>Category</th>
                   <th>Variants</th>
                   <th className="num">Stock</th>
+                  <th>Notes</th>
                   <th className="text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((p) => (
-                  <tr key={p.id} className="align-top">
-                    <td className="font-medium text-ink">{p.name}</td>
-                    <td className="text-muted">{p.category || "—"}</td>
+                {rows.map((p, i) => (
+                  <tr
+                    key={p.id}
+                    className="clickable align-top"
+                    onClick={() => router.push(`/products/stock?p=${p.id}`)}
+                    title="Open stock"
+                  >
+                    <td className="num text-muted">{(page - 1) * pageSize + i + 1}</td>
+                    <td className="font-semibold text-ink">{p.name}</td>
+                    <td>{p.category || <span className="text-muted">—</span>}</td>
                     <td>
                       <div className="flex flex-wrap gap-1">
                         {p.variants.length
@@ -107,13 +133,17 @@ export default function ProductsPage() {
                           : <span className="text-muted">—</span>}
                       </div>
                     </td>
-                    <td className="num">{fmtQty(p.on_hand)}</td>
-                    <td>
+                    <td className="num font-medium">
+                      {Number(p.on_hand) < 0
+                        ? <span className="text-[color:var(--danger)]">{fmtQty(p.on_hand)}</span>
+                        : fmtQty(p.on_hand)}
+                    </td>
+                    <td className="max-w-[16rem] truncate">{p.notes || <span className="text-muted">—</span>}</td>
+                    <td onClick={(e) => e.stopPropagation()}>
                       <div className="flex justify-end gap-1.5">
-                        <button onClick={() => router.push(`/products/stock?p=${p.id}`)} className="inline-flex cursor-pointer items-center rounded-md bg-primary-tint px-2.5 text-xs font-medium text-primary transition-colors hover:bg-primary hover:text-primary-fg">Stock</button>
                         <button onClick={() => setEditing(p)} className="inline-flex cursor-pointer items-center rounded-md bg-surface-2 px-2.5 text-xs font-medium text-ink transition-colors hover:bg-border-strong">Edit</button>
                         {user?.role === "owner" && (
-                          <button onClick={() => remove(p)} className="inline-flex cursor-pointer items-center rounded-md bg-[color:var(--danger-tint)] px-2.5 text-xs font-medium text-[color:var(--danger)] transition-colors hover:bg-[color:var(--danger)] hover:text-white">Delete</button>
+                          <button onClick={() => setDeleting(p)} className="inline-flex cursor-pointer items-center rounded-md bg-[color:var(--danger-tint)] px-2.5 text-xs font-medium text-[color:var(--danger)] transition-colors hover:bg-[color:var(--danger)] hover:text-white">Delete</button>
                         )}
                       </div>
                     </td>
@@ -135,6 +165,17 @@ export default function ProductsPage() {
           onSaved={() => { setCreating(false); setEditing(null); bustCache("/products/options"); reload(); }}
         />
       )}
+
+      <ConfirmDialog
+        open={!!deleting}
+        title="Delete product?"
+        message={<>Are you sure you want to delete <span className="font-semibold text-ink">{deleting?.name}</span>? This action cannot be undone.</>}
+        confirmLabel="Delete"
+        tone="danger"
+        loading={deleteLoading}
+        onConfirm={confirmDelete}
+        onClose={() => setDeleting(null)}
+      />
     </div>
   );
 }

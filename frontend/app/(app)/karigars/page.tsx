@@ -9,22 +9,14 @@ import { useAuth } from "@/lib/auth";
 import { rupees } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select, Textarea } from "@/components/ui/field";
-import { Modal } from "@/components/ui/modal";
-import { TagInput } from "@/components/ui/tag-input";
+import { Select } from "@/components/ui/field";
+import { KarigarForm, type Karigar } from "@/components/karigar-form";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { Badge, Card, EmptyState, Spinner } from "@/components/ui/misc";
-import { PageHeader, SearchBar, Pagination } from "@/components/page-parts";
+import { PageHeader, Pagination } from "@/components/page-parts";
 import { Icon } from "@/components/icons";
 
-interface Karigar {
-  id: number;
-  name: string;
-  phone: string | null;
-  product_types: string[];
-  notes: string | null;
-  total_paid: string;
-}
-
+// Karigar shape + add/edit form live in components/karigar-form.tsx (shared with the account page).
 export default function KarigarsPage() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -35,6 +27,8 @@ export default function KarigarsPage() {
   const [creating, setCreating] = useState(false);
   const [productTypes, setProductTypes] = useState<string[]>([]);
   const [totalPaid, setTotalPaid] = useState(0);
+  const [deleting, setDeleting] = useState<Karigar | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const filters = useMemo(() => ({ search, sort: "name", productType: typeFilter }), [search, typeFilter]);
   const { rows, total, loading, page, setPage, pageSize, setPageSize, reload } = useServerList<Karigar>("/karigars", filters);
@@ -45,47 +39,54 @@ export default function KarigarsPage() {
       .catch(() => {});
   }, [editing, creating]);
 
-  async function remove(k: Karigar) {
-    if (!confirm(`Delete "${k.name}"?`)) return;
+  async function confirmDelete() {
+    if (!deleting) return;
+    setDeleteLoading(true);
     try {
-      await api(`/karigars/${k.id}`, { method: "DELETE" });
+      await api(`/karigars/${deleting.id}`, { method: "DELETE" });
       toast("Karigar deleted", "success");
       bustCache("/karigars/options");
+      setDeleting(null);
       reload();
     } catch (e) {
       toast((e as Error).message, "error");
+    } finally {
+      setDeleteLoading(false);
     }
   }
 
   return (
-    <div className="mx-auto max-w-6xl">
+    <div className="w-full">
       <PageHeader
         title="Karigars"
-        subtitle="Karigars / contractors and their accounts."
+        subtitle={`Contractors and their accounts · total paid ${rupees(totalPaid)}`}
         count={total}
         actions={
-          <Button onClick={() => setCreating(true)}>
-            <Icon.Plus /> <span className="hidden sm:inline">Add Karigar</span>
-          </Button>
+          <>
+            <div className="w-36 sm:w-44">
+              <Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} aria-label="Product type">
+                <option value="">All products</option>
+                {productTypes.map((p) => <option key={p} value={p}>{p}</option>)}
+              </Select>
+            </div>
+            <div className="relative w-40 sm:w-64 lg:w-80">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
+              </span>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search name / phone…"
+                aria-label="Search karigars"
+                className="h-10 w-full rounded-lg border border-border bg-surface pl-9 pr-3 text-sm text-ink shadow-xs outline-none placeholder:text-muted focus:border-primary"
+              />
+            </div>
+            <Button onClick={() => setCreating(true)}>
+              <Icon.Plus /> <span className="hidden sm:inline">Add Karigar</span>
+            </Button>
+          </>
         }
       />
-
-      <SearchBar value={search} onChange={setSearch} placeholder="Search by name / phone…">
-        <div className="w-full shrink-0 sm:w-48">
-          <Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
-            <option value="">All products</option>
-            {productTypes.map((p) => <option key={p} value={p}>{p}</option>)}
-          </Select>
-        </div>
-      </SearchBar>
-
-      <div className="mb-2 flex items-baseline justify-between">
-        <h2 className="text-sm font-semibold text-ink">Karigars</h2>
-        <span className="text-sm">
-          <span className="text-muted">Total paid: </span>
-          <span className="font-semibold text-ink tabular-nums">{rupees(totalPaid)}</span>
-        </span>
-      </div>
 
       <Card className="overflow-hidden">
         {loading ? (
@@ -98,17 +99,26 @@ export default function KarigarsPage() {
             <table className="data-table">
               <thead>
                 <tr>
+                  <th className="w-14 num">S.No.</th>
                   <th>Name</th>
-                  <th>Products</th>
                   <th>Phone</th>
+                  <th>Products</th>
                   <th>Notes</th>
+                  <th className="num">Total paid</th>
                   <th className="text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((k) => (
-                    <tr key={k.id}>
-                      <td className="font-medium text-ink">{k.name}</td>
+                {rows.map((k, i) => (
+                    <tr
+                      key={k.id}
+                      className="clickable"
+                      onClick={() => router.push(`/karigars/account?k=${k.id}`)}
+                      title="Open account"
+                    >
+                      <td className="num text-muted">{(page - 1) * pageSize + i + 1}</td>
+                      <td className="font-semibold text-ink">{k.name}</td>
+                      <td>{k.phone || <span className="text-muted">—</span>}</td>
                       <td>
                         <div className="flex flex-wrap gap-1">
                           {k.product_types.length
@@ -116,14 +126,13 @@ export default function KarigarsPage() {
                             : <span className="text-muted">—</span>}
                         </div>
                       </td>
-                      <td className="text-muted">{k.phone || "—"}</td>
-                      <td className="max-w-[22rem] truncate text-muted">{k.notes || "—"}</td>
-                      <td>
+                      <td className="max-w-[16rem] truncate">{k.notes || <span className="text-muted">—</span>}</td>
+                      <td className="num font-medium text-[color:var(--success)]">{rupees(Number(k.total_paid) || 0)}</td>
+                      <td onClick={(e) => e.stopPropagation()}>
                         <div className="flex justify-end gap-1.5">
-                          <button onClick={() => router.push(`/karigars/account?k=${k.id}`)} className="inline-flex cursor-pointer items-center rounded-md bg-primary-tint px-2.5 text-xs font-medium text-primary transition-colors hover:bg-primary hover:text-primary-fg">Account</button>
                           <button onClick={() => setEditing(k)} className="inline-flex cursor-pointer items-center rounded-md bg-surface-2 px-2.5 text-xs font-medium text-ink transition-colors hover:bg-border-strong">Edit</button>
                           {user?.role === "owner" && (
-                            <button onClick={() => remove(k)} className="inline-flex cursor-pointer items-center rounded-md bg-[color:var(--danger-tint)] px-2.5 text-xs font-medium text-[color:var(--danger)] transition-colors hover:bg-[color:var(--danger)] hover:text-white">Delete</button>
+                            <button onClick={() => setDeleting(k)} className="inline-flex cursor-pointer items-center rounded-md bg-[color:var(--danger-tint)] px-2.5 text-xs font-medium text-[color:var(--danger)] transition-colors hover:bg-[color:var(--danger)] hover:text-white">Delete</button>
                           )}
                         </div>
                       </td>
@@ -144,76 +153,16 @@ export default function KarigarsPage() {
           onSaved={() => { setCreating(false); setEditing(null); bustCache("/karigars/options"); reload(); }}
         />
       )}
+      <ConfirmDialog
+        open={!!deleting}
+        title="Delete karigar?"
+        message={<>Are you sure you want to delete <span className="font-semibold text-ink">{deleting?.name}</span>? This action cannot be undone.</>}
+        confirmLabel="Delete"
+        tone="danger"
+        loading={deleteLoading}
+        onConfirm={confirmDelete}
+        onClose={() => setDeleting(null)}
+      />
     </div>
-  );
-}
-
-function KarigarForm({
-  karigar,
-  onClose,
-  onSaved,
-}: {
-  karigar: Karigar | null;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const { toast } = useToast();
-  const [name, setName] = useState(karigar?.name ?? "");
-  const [phone, setPhone] = useState(karigar?.phone ?? "");
-  const [productTypes, setProductTypes] = useState<string[]>(karigar?.product_types ?? []);
-  const [notes, setNotes] = useState(karigar?.notes ?? "");
-  const [saving, setSaving] = useState(false);
-
-  async function save() {
-    if (!name.trim()) { toast("Name is required", "error"); return; }
-    setSaving(true);
-    try {
-      const body = {
-        name, phone, product_types: productTypes,
-        notes,
-      };
-      if (karigar) await api(`/karigars/${karigar.id}`, { method: "PUT", body });
-      else await api("/karigars", { method: "POST", body });
-      toast(karigar ? "Karigar updated" : "Karigar added", "success");
-      onSaved();
-    } catch (e) {
-      toast((e as Error).message, "error");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title={karigar ? "Edit Karigar" : "New Karigar"}
-      footer={
-        <>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={save} disabled={saving}>{saving ? <Spinner /> : "Save"}</Button>
-        </>
-      }
-    >
-      <div className="flex flex-col gap-4">
-        <Field label="Name *">
-          <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-        </Field>
-        <Field label="Phone">
-          <Input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="numeric" />
-        </Field>
-        <Field label="Products they make" hint="Type and press Enter (box, stand…)">
-          <TagInput
-            value={productTypes}
-            onChange={setProductTypes}
-            placeholder="box, stand…"
-            suggestions={["Box", "Stand", "Tray", "Folder"]}
-          />
-        </Field>
-        <Field label="Notes">
-          <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </Field>
-      </div>
-    </Modal>
   );
 }

@@ -13,7 +13,8 @@ import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { Modal } from "@/components/ui/modal";
 import { TagInput } from "@/components/ui/tag-input";
 import { Badge, Card, EmptyState, Spinner } from "@/components/ui/misc";
-import { PageHeader, SearchBar, Pagination } from "@/components/page-parts";
+import { PageHeader, Pagination } from "@/components/page-parts";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { Icon } from "@/components/icons";
 
 interface Item {
@@ -34,6 +35,8 @@ export default function ItemsPage() {
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<Item | null>(null);
   const [creating, setCreating] = useState(false);
+  const [deleting, setDeleting] = useState<Item | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
   const [unitOptions, setUnitOptions] = useState<string[]>([]);
   const [catFilter, setCatFilter] = useState("");
@@ -46,39 +49,54 @@ export default function ItemsPage() {
     api<{ data: string[] }>("/items/meta/units").then((r) => setUnitOptions(r.data)).catch(() => {});
   }, [editing, creating]);
 
-  async function remove(it: Item) {
-    if (!confirm(`Delete "${it.name}"?`)) return;
+  async function confirmDelete() {
+    if (!deleting) return;
+    setDeleteLoading(true);
     try {
-      await api(`/items/${it.id}`, { method: "DELETE" });
+      await api(`/items/${deleting.id}`, { method: "DELETE" });
       toast("Material deleted", "success");
       bustCache("/items/options");
+      setDeleting(null);
       reload();
     } catch (e) {
       toast((e as Error).message, "error");
+    } finally {
+      setDeleteLoading(false);
     }
   }
 
   return (
-    <div className="mx-auto max-w-6xl">
+    <div className="w-full">
       <PageHeader
         title="Raw Materials"
         subtitle="Cloth, board, foam… with units and colours."
         count={total}
         actions={
-          <Button onClick={() => setCreating(true)}>
-            <Icon.Plus /> <span className="hidden sm:inline">Add Material</span>
-          </Button>
+          <>
+            <div className="relative w-40 sm:w-60 lg:w-80">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
+              </span>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search materials by name…"
+                aria-label="Search materials by name…"
+                className="h-10 w-full rounded-lg border border-border bg-surface pl-9 pr-3 text-sm text-ink shadow-xs outline-none placeholder:text-muted focus:border-primary"
+              />
+            </div>
+            <div className="w-36 sm:w-44">
+              <Select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} aria-label="Category">
+                <option value="">All categories</option>
+                {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+              </Select>
+            </div>
+            <Button onClick={() => setCreating(true)}>
+              <Icon.Plus /> <span className="hidden sm:inline">Add Material</span>
+            </Button>
+          </>
         }
       />
-
-      <SearchBar value={search} onChange={setSearch} placeholder="Search materials by name…">
-        <div className="w-full shrink-0 sm:w-48">
-          <Select value={catFilter} onChange={(e) => setCatFilter(e.target.value)}>
-            <option value="">All categories</option>
-            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
-          </Select>
-        </div>
-      </SearchBar>
 
       <Card className="overflow-hidden">
         {loading ? (
@@ -91,19 +109,27 @@ export default function ItemsPage() {
             <table className="data-table">
               <thead>
                 <tr>
+                  <th className="w-14 num">S.No.</th>
                   <th>Name</th>
                   <th>Category</th>
                   <th>Units</th>
                   <th>Colours</th>
                   <th>Stock</th>
+                  <th>Notes</th>
                   <th className="text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((it) => (
-                  <tr key={it.id} className="align-top">
-                    <td className="font-medium text-ink">{it.name}</td>
-                    <td className="text-muted">{it.category || "—"}</td>
+                {rows.map((it, i) => (
+                  <tr
+                    key={it.id}
+                    className="clickable align-top"
+                    onClick={() => router.push(`/items/stock?i=${it.id}`)}
+                    title="Open stock"
+                  >
+                    <td className="num text-muted">{(page - 1) * pageSize + i + 1}</td>
+                    <td className="font-semibold text-ink">{it.name}</td>
+                    <td>{it.category || <span className="text-muted">—</span>}</td>
                     <td>
                       <div className="flex flex-wrap gap-1">
                         {it.units.map((u) => <Badge key={u}>{u}</Badge>)}
@@ -123,12 +149,12 @@ export default function ItemsPage() {
                           : <span className="text-muted">—</span>}
                       </div>
                     </td>
-                    <td>
+                    <td className="max-w-[16rem] truncate">{it.notes || <span className="text-muted">—</span>}</td>
+                    <td onClick={(e) => e.stopPropagation()}>
                       <div className="flex justify-end gap-1.5">
-                        <button onClick={() => router.push(`/items/stock?i=${it.id}`)} className="inline-flex cursor-pointer items-center rounded-md bg-primary-tint px-2.5 text-xs font-medium text-primary transition-colors hover:bg-primary hover:text-primary-fg">Stock</button>
                         <button onClick={() => setEditing(it)} className="inline-flex cursor-pointer items-center rounded-md bg-surface-2 px-2.5 text-xs font-medium text-ink transition-colors hover:bg-border-strong">Edit</button>
                         {user?.role === "owner" && (
-                          <button onClick={() => remove(it)} className="inline-flex cursor-pointer items-center rounded-md bg-[color:var(--danger-tint)] px-2.5 text-xs font-medium text-[color:var(--danger)] transition-colors hover:bg-[color:var(--danger)] hover:text-white">Delete</button>
+                          <button onClick={() => setDeleting(it)} className="inline-flex cursor-pointer items-center rounded-md bg-[color:var(--danger-tint)] px-2.5 text-xs font-medium text-[color:var(--danger)] transition-colors hover:bg-[color:var(--danger)] hover:text-white">Delete</button>
                         )}
                       </div>
                     </td>
@@ -151,6 +177,17 @@ export default function ItemsPage() {
           onSaved={() => { setCreating(false); setEditing(null); bustCache("/items/options"); reload(); }}
         />
       )}
+
+      <ConfirmDialog
+        open={!!deleting}
+        title="Delete material?"
+        message={<>Are you sure you want to delete <span className="font-semibold text-ink">{deleting?.name}</span>? This action cannot be undone.</>}
+        confirmLabel="Delete"
+        tone="danger"
+        loading={deleteLoading}
+        onConfirm={confirmDelete}
+        onClose={() => setDeleting(null)}
+      />
     </div>
   );
 }

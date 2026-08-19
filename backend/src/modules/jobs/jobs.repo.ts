@@ -24,6 +24,8 @@ export interface JobCreateInput {
   expected_note?: string | null;
   notes?: string | null;
   issues: JobIssueInput[];
+  /** Advance handed over while issuing the material. */
+  payment?: { amount: number; method?: string | null; on_date?: string | null; note?: string | null } | null;
   created_by?: number | null;
 }
 
@@ -37,6 +39,22 @@ export interface JobListRow {
   issue_lines: number;
   received_qty: string;
   created_at: string;
+}
+
+/** Money handed to the karigar as part of this job step. Written inside the caller's
+ *  transaction so a failed stock insert can never leave an orphan payment behind. */
+async function insertJobPayment(
+  client: { query: (q: string, v?: unknown[]) => Promise<unknown> },
+  jobId: number,
+  karigarId: number,
+  pay: { amount: number; method?: string | null; on_date?: string | null; note?: string | null },
+): Promise<void> {
+  if (!(pay.amount > 0)) return;
+  await client.query(
+    `INSERT INTO payments (party_type, party_id, direction, amount, method, pay_date, ref_note, job_id)
+     VALUES ('karigar', $1, 'paid', $2, COALESCE($3,'cash'), COALESCE($4, CURRENT_DATE), $5, $6)`,
+    [karigarId, pay.amount, pay.method ?? null, pay.on_date ?? null, pay.note ?? null, jobId],
+  );
 }
 
 export const jobsRepo = {
@@ -55,6 +73,12 @@ export const jobsRepo = {
       );
       const jobId = rows[0]!.id;
       await insertIssues(client, jobId, input.issues, input.job_date ?? null);
+      if (input.payment) {
+        await insertJobPayment(client, jobId, input.karigar_id, {
+          ...input.payment,
+          on_date: input.payment.on_date ?? input.job_date ?? null,
+        });
+      }
       return { id: jobId };
     });
   },
@@ -72,6 +96,7 @@ export const jobsRepo = {
     receipts: JobReceiptInput[],
     returns: JobReturnInput[],
     onDate?: string | null,
+    payment?: { amount: number; method?: string | null; note?: string | null } | null,
   ): Promise<void> {
     await withTransaction(async (client) => {
       for (const r of receipts) {
@@ -92,6 +117,11 @@ export const jobsRepo = {
            VALUES ($1,$2,$3,$4,'job_return',$5,NULL, COALESCE($6, CURRENT_DATE))`,
           [ret.item_id, ret.variant_id ?? null, ret.unit, ret.qty, jobId, onDate ?? null],
         );
+      }
+      if (payment && payment.amount > 0) {
+        const owner = await client.query<{ karigar_id: number }>('SELECT karigar_id FROM jobs WHERE id = $1', [jobId]);
+        const karigarId = owner.rows[0]?.karigar_id;
+        if (karigarId) await insertJobPayment(client, jobId, karigarId, { ...payment, on_date: onDate ?? null });
       }
     });
   },
@@ -206,6 +236,10 @@ export const jobsRepo = {
       );
       await client.query(`DELETE FROM job_receipts WHERE job_id = $1`, [id]);
       await client.query(`DELETE FROM job_issues WHERE job_id = $1`, [id]);
+      // Money paid for this job goes with it, so the karigar's total paid is
+      // reversed too. (The FK is ON DELETE SET NULL, which would otherwise leave
+      // these behind as untraceable on-account payments.)
+      await client.query(`DELETE FROM payments WHERE job_id = $1`, [id]);
       const res = await client.query(`DELETE FROM jobs WHERE id = $1`, [id]);
       return (res.rowCount ?? 0) > 0;
     });

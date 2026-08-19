@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { query } from '../../config/db.js';
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { AppError, asyncHandler } from '../../utils/http.js';
-import { pastOrTodayDateSchema } from '../../utils/validation.js';
+import { parseId, pastOrTodayDateSchema } from '../../utils/validation.js';
 
 export const paymentsRouter = Router();
 paymentsRouter.use(requireAuth);
@@ -16,6 +16,10 @@ const paymentSchema = z.object({
   method: z.string().trim().max(30).default('cash'),
   pay_date: pastOrTodayDateSchema.optional().nullable(),
   ref_note: z.string().trim().max(2000).optional().nullable(),
+  /** The purchase this payment settles. Omit for opening-balance / on-account payments. */
+  purchase_id: z.coerce.number().int().positive().optional().nullable(),
+  /** The karigar job this payment was for. Omit for a general lump sum. */
+  job_id: z.coerce.number().int().positive().optional().nullable(),
 });
 
 /** The table each party_type lives in — used to confirm the party exists before recording money against it. */
@@ -66,9 +70,25 @@ paymentsRouter.post(
     const table = PARTY_TABLE[input.party_type];
     const found = await query(`SELECT 1 FROM ${table} WHERE id = $1`, [input.party_id]);
     if (found.rowCount === 0) throw new AppError(404, `That ${input.party_type} was not found.`);
+
+    // A linked purchase must exist AND belong to this vendor, so a payment can never
+    // be attached to another party's bill.
+    if (input.purchase_id != null) {
+      if (input.party_type !== 'vendor') throw new AppError(400, 'Only vendor payments can be linked to a purchase.');
+      const bill = await query('SELECT 1 FROM purchases WHERE id = $1 AND vendor_id = $2', [input.purchase_id, input.party_id]);
+      if (bill.rowCount === 0) throw new AppError(404, 'That purchase was not found for this vendor.');
+    }
+
+    // Same rule on the karigar side: a payment can only be linked to that karigar's own job.
+    if (input.job_id != null) {
+      if (input.party_type !== 'karigar') throw new AppError(400, 'Only karigar payments can be linked to a job.');
+      const job = await query('SELECT 1 FROM jobs WHERE id = $1 AND karigar_id = $2', [input.job_id, input.party_id]);
+      if (job.rowCount === 0) throw new AppError(404, 'That job was not found for this karigar.');
+    }
+
     const { rows } = await query(
-      `INSERT INTO payments (party_type, party_id, direction, amount, method, pay_date, ref_note, created_by)
-       VALUES ($1,$2,$3,$4,$5, COALESCE($6, CURRENT_DATE), $7, $8) RETURNING *`,
+      `INSERT INTO payments (party_type, party_id, direction, amount, method, pay_date, ref_note, purchase_id, job_id, created_by)
+       VALUES ($1,$2,$3,$4,$5, COALESCE($6, CURRENT_DATE), $7, $8, $9, $10) RETURNING *`,
       [
         input.party_type,
         input.party_id,
@@ -77,9 +97,22 @@ paymentsRouter.post(
         input.method,
         input.pay_date ?? null,
         input.ref_note ?? null,
+        input.purchase_id ?? null,
+        input.job_id ?? null,
         req.user?.id ?? null,
       ],
     );
     res.status(201).json({ data: rows[0] });
+  }),
+);
+
+/** Remove a wrongly-recorded payment voucher. Money-only row — nothing to reverse in stock. */
+paymentsRouter.delete(
+  '/:id',
+  requireRole('owner'),
+  asyncHandler(async (req, res) => {
+    const result = await query('DELETE FROM payments WHERE id = $1', [parseId(req.params.id)]);
+    if ((result.rowCount ?? 0) === 0) throw new AppError(404, 'Payment not found');
+    res.json({ ok: true });
   }),
 );
