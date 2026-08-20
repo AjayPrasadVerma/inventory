@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { useServerList } from "@/lib/use-server-list";
 import { bustCache } from "@/lib/cache";
@@ -30,13 +30,16 @@ export default function KarigarsPage() {
   const [deleting, setDeleting] = useState<Karigar | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  // The command palette links here as `?new=1`, so open the create form on arrival.
+  // The command palette links here as `?new=1`. Read it with useSearchParams so it
+  // still fires when the palette navigates from this very page — changing only the
+  // query string does not remount the segment, so a mount-only read would miss it.
+  const wantsNew = useSearchParams().get("new") === "1";
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("new") !== "1") return;
-    window.history.replaceState(null, "", window.location.pathname);
+    if (!wantsNew) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- opens the form for a ?new=1 deep link
     setCreating(true);
-  }, []);
+    router.replace("/karigars", { scroll: false });
+  }, [wantsNew, router]);
 
   const filters = useMemo(() => ({ search, sort: "name", productType: typeFilter }), [search, typeFilter]);
   const { rows, total, loading, page, setPage, pageSize, setPageSize, reload } = useServerList<Karigar>("/karigars", filters);

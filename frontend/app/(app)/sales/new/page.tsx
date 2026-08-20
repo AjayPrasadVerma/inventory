@@ -48,7 +48,7 @@ export default function NewSalePage() {
 
   const loadOptions = useCallback(async () => {
     try {
-      const id = new URLSearchParams(window.location.search).get("edit");
+      const id = new URLSearchParams(window.location.search).get("edit"); // guards-allow: reached only by a fresh navigation from the sales list; nothing links here from this same route
       setEditId(id);
       const r = await cachedGet<{ data: RawProduct[] }>("/products/options");
       setProducts(r.data.map((p) => ({ id: p.id, name: p.name, variants: p.variant_options.map((v) => ({ id: v.id, label: v.variant })) })));

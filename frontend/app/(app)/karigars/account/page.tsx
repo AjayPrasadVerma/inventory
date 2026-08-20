@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { bustCache, cachedGet } from "@/lib/cache";
 import { useAuth } from "@/lib/auth";
@@ -50,10 +50,18 @@ export default function KarigarAccountPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
+  const params = useSearchParams();
   const isOwner = user?.role === "owner";
 
   const [karigars, setKarigars] = useState<KarigarLite[]>([]);
-  const [karigarId, setKarigarId] = useState("");
+  // The record on screen comes from the URL, not from local state: the command
+  // palette navigates by changing only ?k=, which does not remount this segment,
+  // so anything read once on mount would ignore it.
+  const karigarId = params.get("k") ?? "";
+  const setKarigarId = useCallback(
+    (id: string) => router.replace(id ? `?k=${id}` : "?", { scroll: false }),
+    [router],
+  );
   const [karigar, setKarigar] = useState<Karigar | null>(null);
   const [khata, setKhata] = useState<Khata | null>(null);
   const [loading, setLoading] = useState(false);
@@ -75,8 +83,6 @@ export default function KarigarAccountPage() {
     cachedGet<{ data: KarigarLite[] }>("/karigars/options")
       .then((r) => {
         setKarigars(r.data);
-        const preset = new URLSearchParams(window.location.search).get("k");
-        if (preset && r.data.some((k) => String(k.id) === preset)) setKarigarId(preset);
       })
       .catch((e) => setError((e as Error).message));
   }, []);
@@ -100,7 +106,6 @@ export default function KarigarAccountPage() {
 
   useEffect(() => {
     if (!karigarId) return;
-    window.history.replaceState(null, "", `?k=${karigarId}`);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- loads account data after a karigar change
     loadAccount(karigarId);
   }, [karigarId, loadAccount]);

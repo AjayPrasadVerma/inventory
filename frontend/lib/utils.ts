@@ -27,7 +27,12 @@ export function formatDate(value: string | null | undefined): string {
 
 /** Today's date as yyyy-mm-dd (for date inputs). */
 export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  // Local parts, never toISOString(): that is UTC, so in IST the "today" it
+  // returns is yesterday until 05:30, which made the real current day
+  // unreachable on any control capped at today.
+  const d = new Date();
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
 }
 
 /** Display label for a user role. The internal 'owner' role is the full-access role, shown as "Admin". */

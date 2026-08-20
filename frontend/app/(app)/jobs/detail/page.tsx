@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { cachedGet } from "@/lib/cache";
 import { useAuth } from "@/lib/auth";
@@ -38,13 +38,13 @@ export default function JobDetailPage() {
   const router = useRouter();
   const { user } = useAuth();
   const { toast } = useToast();
-  const [jobId, setJobId] = useState<number | null>(null);
+  const params = useSearchParams();
+  const jobIdParam = params.get("j");
+  const jobId = jobIdParam && !Number.isNaN(Number(jobIdParam)) ? Number(jobIdParam) : null;
   const [job, setJob] = useState<JobDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<Mode>(() =>
-    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("edit") === "1" ? "edit" : "main",
-  );
+  const [mode, setMode] = useState<Mode>(params.get("edit") === "1" ? "edit" : "main");
   const [items, setItems] = useState<ItemOpt[]>([]);
   const [products, setProducts] = useState<ProductOpt[]>([]);
   const [deleting, setDeleting] = useState(false);
@@ -62,18 +62,15 @@ export default function JobDetailPage() {
     return () => { alive = false; };
   }, []);
 
-  // Read ?j=<id> once on mount (mirrors vendors/account reading ?v=).
+  // Follow ?j= whenever it changes, not just on mount.
   useEffect(() => {
-    const idStr = new URLSearchParams(window.location.search).get("j");
-    const idNum = idStr ? Number(idStr) : NaN;
-    if (!idStr || Number.isNaN(idNum)) {
+    if (jobId == null) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- no valid ?j= id: stop the spinner and show not-found
       setLoading(false);
       return;
     }
-    setJobId(idNum);
-    return load(idNum);
-  }, [load]);
+    return load(jobId);
+  }, [jobId, load]);
 
   // Option lists for the issue/receive sub-flows (set only inside the promise).
   useEffect(() => {

@@ -242,12 +242,20 @@ export const vendorsRepo = {
     )).rows;
 
     const materials = (await query<{ name: string; color: string | null; unit: string; qty: string; amount: string }>(
-      `SELECT i.name, iv.color, pi.unit, SUM(pi.qty) AS qty, SUM(pi.amount) AS amount
+      // LEFT JOINs over both catalogues: a line is either a raw material or a
+      // bought-in finished product, so an inner join drops one kind entirely and
+      // the material table stops reconciling with its own total.
+      `SELECT COALESCE(i.name, pr.name) AS name,
+              COALESCE(iv.color, pv.variant) AS color,
+              pi.unit, SUM(pi.qty) AS qty, SUM(pi.amount) AS amount
        FROM purchase_items pi JOIN purchases p ON p.id = pi.purchase_id
-       JOIN items i ON i.id = pi.item_id
+       LEFT JOIN items i ON i.id = pi.item_id
        LEFT JOIN item_variants iv ON iv.id = pi.variant_id
+       LEFT JOIN products pr ON pr.id = pi.product_id
+       LEFT JOIN product_variants pv ON pv.id = pi.product_variant_id
        WHERE p.vendor_id = $1
-       GROUP BY i.name, iv.color, pi.unit ORDER BY i.name, iv.color`,
+       GROUP BY COALESCE(i.name, pr.name), COALESCE(iv.color, pv.variant), pi.unit
+       ORDER BY 1, 2`,
       [id],
     )).rows;
 

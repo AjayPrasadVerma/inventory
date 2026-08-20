@@ -84,18 +84,9 @@ const editSchema = z.object({
   vendor_id: z.coerce.number().int().positive().optional(),
   bill_no: z.string().trim().max(60).optional().nullable(),
   purchase_date: pastOrTodayDateSchema.optional(),
-  items: z
-    .array(
-      z.object({
-        item_id: z.coerce.number().int().positive(),
-        variant_id: z.coerce.number().int().positive().nullable().optional(),
-        unit: z.string().trim().min(1).max(30),
-        qty: z.coerce.number().positive().max(1_000_000),
-        rate: z.coerce.number().min(0).max(1_000_000_000),
-      }),
-    )
-    .max(200, 'Too many items')
-    .optional(),
+  // Same line shape as create — otherwise a bill containing a finished-product
+  // line cannot be edited at all (the old inline schema required item_id).
+  items: z.array(purchaseItemSchema).max(200, 'Too many items').optional(),
 });
 
 purchasesRouter.patch(

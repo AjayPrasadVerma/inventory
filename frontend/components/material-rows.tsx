@@ -424,10 +424,15 @@ export function PricedRows({
     ]));
   }, [kinds, options, primaryLabel]);
 
-  const kindCol = kinds ? "8.5rem_" : "";
-  const grid = withUnit
-    ? `grid grid-cols-[2rem_${kindCol}minmax(0,1fr)_7.5rem_5.5rem_5rem_6rem_6.5rem_2.25rem] items-center gap-2`
-    : `grid grid-cols-[2rem_${kindCol}minmax(0,1fr)_9rem_5.5rem_6.5rem_7rem_2.25rem] items-center gap-2`;
+  // Written out in full: Tailwind scans source text, so a class assembled from
+  // a template literal is never emitted and the rows collapse to one column.
+  const grid = kinds
+    ? withUnit
+      ? "grid grid-cols-[2rem_8.5rem_minmax(0,1fr)_7.5rem_5.5rem_5rem_6rem_6.5rem_2.25rem] items-center gap-2"
+      : "grid grid-cols-[2rem_8.5rem_minmax(0,1fr)_9rem_5.5rem_6.5rem_7rem_2.25rem] items-center gap-2"
+    : withUnit
+      ? "grid grid-cols-[2rem_minmax(0,1fr)_7.5rem_5.5rem_5rem_6rem_6.5rem_2.25rem] items-center gap-2"
+      : "grid grid-cols-[2rem_minmax(0,1fr)_9rem_5.5rem_6.5rem_7rem_2.25rem] items-center gap-2";
   const minW = kinds ? "min-w-[840px]" : withUnit ? "min-w-[720px]" : "min-w-[640px]";
 
   function patch(key: number, p: Partial<PricedLine>) {
@@ -481,7 +486,7 @@ export function PricedRows({
           {/* rows */}
           <div ref={containerRef} className="max-h-[42vh] overflow-y-auto">
             {lines.map((l, idx) => {
-              const cat = byKind.get(l.kind) ?? byKind.get("item")!;
+              const cat = byKind.get(l.kind) ?? [...byKind.values()][0]!;
               const item = cat.byId.get(Number(l.itemId));
               const isLast = idx === lines.length - 1;
               const invalid = invalidKeys?.has(l.key);

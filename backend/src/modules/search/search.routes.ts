@@ -30,86 +30,92 @@ const schema = z.object({
 
 /** Rank exact hits above prefix hits above anything else, then alphabetically. */
 const RANK = (col: string) => `CASE WHEN lower(${col}) = lower($1) THEN 0
-       WHEN ${col} ILIKE $2 THEN 1 ELSE 2 END`;
+       WHEN ${col} ILIKE $2 ESCAPE '\\' THEN 1 ELSE 2 END`;
 
 searchRouter.get(
   '/',
   asyncHandler(async (req, res) => {
     const { q, limit } = schema.parse(req.query);
+    // `%` and `_` are LIKE wildcards — unescaped, a term of "%" matched every row
+    // in all six tables and defeated every index.
+    const esc = q.replace(/[\\%_]/g, '\\$&');
     const exact = q;
-    const prefix = `${q}%`;
-    const like = `%${q}%`;
-    const asId = /^#?\d+$/.test(q) ? Number(q.replace('#', '')) : null;
+    const prefix = `${esc}%`;
+    const like = `%${esc}%`;
+    // jobs.id is int4: a 10-digit phone number overflows it, and because all six
+    // queries share one Promise.all that rejection took the whole search down.
+    const asNum = /^#?\d+$/.test(q) ? Number(q.replace('#', '')) : null;
+    const asId = asNum !== null && asNum <= 2147483647 ? asNum : null;
     const p = [exact, prefix, like, limit];
 
     const [vendors, karigars, items, products, purchases, jobs] = await Promise.all([
       query<Hit>(
         `SELECT 'vendor' AS type, v.id, v.name AS title,
                 NULLIF(concat_ws(' · ', v.city, v.phone), '') AS subtitle,
-                CASE WHEN v.name ILIKE $3 THEN NULL
-                     WHEN v.phone ILIKE $3 THEN 'Phone: ' || v.phone
-                     WHEN v.city ILIKE $3 THEN 'City: ' || v.city
-                     WHEN v.gst_no ILIKE $3 THEN 'GST: ' || v.gst_no
+                CASE WHEN v.name ILIKE $3 ESCAPE '\\' THEN NULL
+                     WHEN v.phone ILIKE $3 ESCAPE '\\' THEN 'Phone: ' || v.phone
+                     WHEN v.city ILIKE $3 ESCAPE '\\' THEN 'City: ' || v.city
+                     WHEN v.gst_no ILIKE $3 ESCAPE '\\' THEN 'GST: ' || v.gst_no
                      ELSE 'Notes' END AS matched,
                 NULL AS stock,
                 '/vendors/account?v=' || v.id AS href
          FROM vendors v
-         WHERE v.is_active AND (v.name ILIKE $3 OR v.phone ILIKE $3 OR v.city ILIKE $3
-                                OR v.gst_no ILIKE $3 OR v.notes ILIKE $3)
+         WHERE v.is_active AND (v.name ILIKE $3 ESCAPE '\\' OR v.phone ILIKE $3 ESCAPE '\\' OR v.city ILIKE $3 ESCAPE '\\'
+                                OR v.gst_no ILIKE $3 ESCAPE '\\' OR v.notes ILIKE $3 ESCAPE '\\')
          ORDER BY ${RANK('v.name')}, v.name LIMIT $4`, p),
 
       query<Hit>(
         `SELECT 'karigar' AS type, k.id, k.name AS title,
                 NULLIF(concat_ws(' · ', k.phone, array_to_string(k.product_types, ', ')), '') AS subtitle,
-                CASE WHEN k.name ILIKE $3 THEN NULL
-                     WHEN k.phone ILIKE $3 THEN 'Phone: ' || k.phone
-                     WHEN array_to_string(k.product_types, ', ') ILIKE $3
+                CASE WHEN k.name ILIKE $3 ESCAPE '\\' THEN NULL
+                     WHEN k.phone ILIKE $3 ESCAPE '\\' THEN 'Phone: ' || k.phone
+                     WHEN array_to_string(k.product_types, ', ') ILIKE $3 ESCAPE '\\'
                        THEN 'Makes: ' || array_to_string(k.product_types, ', ')
                      ELSE 'Notes' END AS matched,
                 NULL AS stock,
                 '/karigars/account?k=' || k.id AS href
          FROM karigars k
-         WHERE k.is_active AND (k.name ILIKE $3 OR k.phone ILIKE $3 OR k.notes ILIKE $3
-                                OR array_to_string(k.product_types, ', ') ILIKE $3)
+         WHERE k.is_active AND (k.name ILIKE $3 ESCAPE '\\' OR k.phone ILIKE $3 ESCAPE '\\' OR k.notes ILIKE $3 ESCAPE '\\'
+                                OR array_to_string(k.product_types, ', ') ILIKE $3 ESCAPE '\\')
          ORDER BY ${RANK('k.name')}, k.name LIMIT $4`, p),
 
       query<Hit>(
         `SELECT 'item' AS type, i.id, i.name AS title,
                 NULLIF(concat_ws(' · ', i.category,
                   (SELECT string_agg(DISTINCT u.unit, ', ') FROM item_units u WHERE u.item_id = i.id)), '') AS subtitle,
-                CASE WHEN i.name ILIKE $3 THEN NULL
-                     WHEN i.category ILIKE $3 THEN 'Category: ' || i.category
-                     WHEN EXISTS (SELECT 1 FROM item_variants v WHERE v.item_id = i.id AND v.color ILIKE $3)
+                CASE WHEN i.name ILIKE $3 ESCAPE '\\' THEN NULL
+                     WHEN i.category ILIKE $3 ESCAPE '\\' THEN 'Category: ' || i.category
+                     WHEN EXISTS (SELECT 1 FROM item_variants v WHERE v.item_id = i.id AND v.color ILIKE $3 ESCAPE '\\')
                        THEN 'Colour: ' || (SELECT string_agg(v.color, ', ') FROM item_variants v
-                                           WHERE v.item_id = i.id AND v.color ILIKE $3)
-                     WHEN EXISTS (SELECT 1 FROM item_units u WHERE u.item_id = i.id AND u.unit ILIKE $3)
+                                           WHERE v.item_id = i.id AND v.color ILIKE $3 ESCAPE '\\')
+                     WHEN EXISTS (SELECT 1 FROM item_units u WHERE u.item_id = i.id AND u.unit ILIKE $3 ESCAPE '\\')
                        THEN 'Unit match' ELSE 'Notes' END AS matched,
                 (SELECT string_agg(rtrim(trim(to_char(x.qty, 'FM999999990.999')), '.') || ' ' || x.unit, ', ' ORDER BY x.unit)
                    FROM (SELECT sm.unit, SUM(sm.qty) AS qty FROM stock_movements sm
                          WHERE sm.item_id = i.id GROUP BY sm.unit HAVING SUM(sm.qty) <> 0) x) AS stock,
                 '/items/stock?i=' || i.id AS href
          FROM items i
-         WHERE i.is_active AND (i.name ILIKE $3 OR i.category ILIKE $3 OR i.notes ILIKE $3
-                                OR EXISTS (SELECT 1 FROM item_variants v WHERE v.item_id = i.id AND v.color ILIKE $3)
-                                OR EXISTS (SELECT 1 FROM item_units u WHERE u.item_id = i.id AND u.unit ILIKE $3))
+         WHERE i.is_active AND (i.name ILIKE $3 ESCAPE '\\' OR i.category ILIKE $3 ESCAPE '\\' OR i.notes ILIKE $3 ESCAPE '\\'
+                                OR EXISTS (SELECT 1 FROM item_variants v WHERE v.item_id = i.id AND v.color ILIKE $3 ESCAPE '\\')
+                                OR EXISTS (SELECT 1 FROM item_units u WHERE u.item_id = i.id AND u.unit ILIKE $3 ESCAPE '\\'))
          ORDER BY ${RANK('i.name')}, i.name LIMIT $4`, p),
 
       query<Hit>(
         `SELECT 'product' AS type, p.id, p.name AS title,
                 NULLIF(concat_ws(' · ', p.category,
                   (SELECT string_agg(DISTINCT pv.variant, ', ') FROM product_variants pv WHERE pv.product_id = p.id)), '') AS subtitle,
-                CASE WHEN p.name ILIKE $3 THEN NULL
-                     WHEN p.category ILIKE $3 THEN 'Category: ' || p.category
-                     WHEN EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = p.id AND pv.variant ILIKE $3)
+                CASE WHEN p.name ILIKE $3 ESCAPE '\\' THEN NULL
+                     WHEN p.category ILIKE $3 ESCAPE '\\' THEN 'Category: ' || p.category
+                     WHEN EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = p.id AND pv.variant ILIKE $3 ESCAPE '\\')
                        THEN 'Variant: ' || (SELECT string_agg(pv.variant, ', ') FROM product_variants pv
-                                            WHERE pv.product_id = p.id AND pv.variant ILIKE $3)
+                                            WHERE pv.product_id = p.id AND pv.variant ILIKE $3 ESCAPE '\\')
                      ELSE 'Notes' END AS matched,
                 (SELECT rtrim(trim(to_char(COALESCE(SUM(f.qty), 0), 'FM999999990.999')), '.') || ' pcs'
                    FROM finished_stock_movements f WHERE f.product_id = p.id) AS stock,
                 '/products/stock?p=' || p.id AS href
          FROM products p
-         WHERE p.is_active AND (p.name ILIKE $3 OR p.category ILIKE $3 OR p.notes ILIKE $3
-                                OR EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = p.id AND pv.variant ILIKE $3))
+         WHERE p.is_active AND (p.name ILIKE $3 ESCAPE '\\' OR p.category ILIKE $3 ESCAPE '\\' OR p.notes ILIKE $3 ESCAPE '\\'
+                                OR EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = p.id AND pv.variant ILIKE $3 ESCAPE '\\'))
          ORDER BY ${RANK('p.name')}, p.name LIMIT $4`, p),
 
       // A bill number is often the fastest way back to a purchase — land on the
@@ -122,7 +128,7 @@ searchRouter.get(
                 NULL AS stock,
                 '/vendors/account?v=' || pu.vendor_id AS href
          FROM purchases pu JOIN vendors v ON v.id = pu.vendor_id
-         WHERE pu.bill_no ILIKE $3
+         WHERE pu.bill_no ILIKE $3 ESCAPE '\\'
          ORDER BY ${RANK('pu.bill_no')}, pu.purchase_date DESC LIMIT $4`, p),
 
       asId
