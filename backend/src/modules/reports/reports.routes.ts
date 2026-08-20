@@ -218,6 +218,128 @@ reportsRouter.get(
  * activity, category rollups, and the low/oversold list) so the client doesn't have to
  * download the full stock ledger and recompute — important on slow connections.
  */
+/**
+ * Everything that happened on one day, as a single feed. Answers "aaj kya hua?"
+ * without opening four different pages, and the date is a parameter so any past
+ * day can be checked the same way.
+ */
+reportsRouter.get(
+  '/activity',
+  asyncHandler(async (req, res) => {
+    const { date } = z.object({ date: dateStringSchema.optional() }).parse(req.query);
+    const d = date ?? null; // null → CURRENT_DATE, resolved in SQL so it uses the server's day
+
+    const [purchases, issues, receipts, returns, payments, adjustments] = await Promise.all([
+      query(
+        `SELECT p.id, v.name AS party, p.bill_no, p.total_amount AS amount,
+                (SELECT json_agg(json_build_object('name', i.name, 'variant', iv.color, 'unit', pi.unit, 'qty', pi.qty) ORDER BY pi.id)
+                   FROM purchase_items pi JOIN items i ON i.id = pi.item_id
+                   LEFT JOIN item_variants iv ON iv.id = pi.variant_id
+                  WHERE pi.purchase_id = p.id) AS lines
+         FROM purchases p JOIN vendors v ON v.id = p.vendor_id
+         WHERE p.purchase_date = COALESCE($1::date, CURRENT_DATE)
+         ORDER BY p.id DESC`, [d]),
+
+      query(
+        `SELECT j.id, k.name AS party,
+                json_agg(json_build_object('name', i.name, 'variant', iv.color, 'unit', ji.unit, 'qty', ji.qty) ORDER BY ji.id) AS lines
+         FROM job_issues ji
+         JOIN jobs j ON j.id = ji.job_id JOIN karigars k ON k.id = j.karigar_id
+         JOIN items i ON i.id = ji.item_id
+         LEFT JOIN item_variants iv ON iv.id = ji.variant_id
+         WHERE ji.issued_on = COALESCE($1::date, CURRENT_DATE)
+         GROUP BY j.id, k.name ORDER BY j.id DESC`, [d]),
+
+      query(
+        `SELECT j.id, k.name AS party,
+                json_agg(json_build_object('name', pr.name, 'variant', pv.variant, 'unit', 'pcs', 'qty', jr.qty) ORDER BY jr.id) AS lines
+         FROM job_receipts jr
+         JOIN jobs j ON j.id = jr.job_id JOIN karigars k ON k.id = j.karigar_id
+         JOIN products pr ON pr.id = jr.product_id
+         LEFT JOIN product_variants pv ON pv.id = jr.variant_id
+         WHERE jr.received_on = COALESCE($1::date, CURRENT_DATE)
+         GROUP BY j.id, k.name ORDER BY j.id DESC`, [d]),
+
+      query(
+        `SELECT j.id, k.name AS party,
+                json_agg(json_build_object('name', i.name, 'variant', iv.color, 'unit', sm.unit, 'qty', ABS(sm.qty)) ORDER BY sm.id) AS lines
+         FROM stock_movements sm
+         JOIN jobs j ON j.id = sm.ref_id JOIN karigars k ON k.id = j.karigar_id
+         JOIN items i ON i.id = sm.item_id
+         LEFT JOIN item_variants iv ON iv.id = sm.variant_id
+         WHERE sm.reason = 'job_return' AND sm.moved_on = COALESCE($1::date, CURRENT_DATE)
+         GROUP BY j.id, k.name ORDER BY j.id DESC`, [d]),
+
+      query(
+        `SELECT pay.id, pay.amount, pay.method, pay.party_type, pay.ref_note,
+                CASE pay.party_type
+                  WHEN 'vendor'  THEN (SELECT name FROM vendors  WHERE id = pay.party_id)
+                  WHEN 'karigar' THEN (SELECT name FROM karigars WHERE id = pay.party_id)
+                  ELSE (SELECT COALESCE(name, mobile) FROM customers WHERE id = pay.party_id) END AS party,
+                COALESCE('Bill ' || (SELECT bill_no FROM purchases WHERE id = pay.purchase_id),
+                         'Job #' || pay.job_id) AS against
+         FROM payments pay
+         WHERE pay.pay_date = COALESCE($1::date, CURRENT_DATE)
+         ORDER BY pay.id DESC`, [d]),
+
+      // Opening stock and manual corrections — they change stock, so they belong here.
+      query(
+        `SELECT sm.id, i.name, iv.color AS variant, sm.unit, sm.qty, sm.note
+         FROM stock_movements sm
+         JOIN items i ON i.id = sm.item_id
+         LEFT JOIN item_variants iv ON iv.id = sm.variant_id
+         WHERE sm.reason = 'adjustment' AND sm.moved_on = COALESCE($1::date, CURRENT_DATE)
+         ORDER BY sm.id DESC`, [d]),
+    ]);
+
+    type Line = { name: string; variant: string | null; unit: string; qty: string };
+    const feed = [
+      ...purchases.rows.map((r: any) => ({
+        kind: 'purchase' as const, id: r.id, party: r.party,
+        ref: r.bill_no ? `Bill ${r.bill_no}` : `Purchase #${r.id}`,
+        amount: Number(r.amount), lines: (r.lines ?? []) as Line[], note: null,
+      })),
+      ...issues.rows.map((r: any) => ({
+        kind: 'issue' as const, id: r.id, party: r.party, ref: `Job #${r.id}`,
+        amount: null, lines: (r.lines ?? []) as Line[], note: null,
+      })),
+      ...receipts.rows.map((r: any) => ({
+        kind: 'receipt' as const, id: r.id, party: r.party, ref: `Job #${r.id}`,
+        amount: null, lines: (r.lines ?? []) as Line[], note: null,
+      })),
+      ...returns.rows.map((r: any) => ({
+        kind: 'return' as const, id: r.id, party: r.party, ref: `Job #${r.id}`,
+        amount: null, lines: (r.lines ?? []) as Line[], note: null,
+      })),
+      ...payments.rows.map((r: any) => ({
+        kind: 'payment' as const, id: r.id, party: r.party,
+        ref: r.against ?? r.ref_note ?? r.method ?? 'Payment',
+        amount: Number(r.amount), lines: [] as Line[], note: r.method,
+      })),
+      ...adjustments.rows.map((r: any) => ({
+        kind: 'adjustment' as const, id: r.id, party: r.note ?? 'Stock adjustment',
+        ref: r.note ?? 'Adjustment', amount: null,
+        lines: [{ name: r.name, variant: r.variant, unit: r.unit, qty: r.qty }] as Line[], note: r.note,
+      })),
+    ];
+
+    res.json({
+      data: {
+        counts: {
+          purchases: purchases.rowCount ?? 0,
+          issues: issues.rowCount ?? 0,
+          receipts: receipts.rowCount ?? 0,
+          returns: returns.rowCount ?? 0,
+          payments: payments.rowCount ?? 0,
+          adjustments: adjustments.rowCount ?? 0,
+        },
+        paid: payments.rows.reduce((n: number, r: any) => n + Number(r.amount), 0),
+        events: feed,
+      },
+    });
+  }),
+);
+
 reportsRouter.get(
   '/dashboard',
   asyncHandler(async (_req, res) => {
