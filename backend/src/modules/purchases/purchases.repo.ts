@@ -1,12 +1,25 @@
 import { query, withTransaction } from '../../config/db.js';
 
+/**
+ * One purchase line. `kind` decides which side of stock it lands on:
+ * a raw material goes to stock_movements, a bought-in finished product goes to
+ * finished_stock_movements with reason 'purchase'. The DB enforces that exactly
+ * one of item_id / product_id is set.
+ */
 export interface PurchaseItemInput {
-  item_id: number;
+  kind?: 'item' | 'product';
+  item_id?: number | null;
+  product_id?: number | null;
   variant_id?: number | null;
   unit: string;
   qty: number;
   rate: number;
   amount?: number;
+}
+
+/** Which table a line belongs to — defaults to raw material for older callers. */
+function lineKind(it: PurchaseItemInput): 'item' | 'product' {
+  return it.kind ?? (it.product_id != null ? 'product' : 'item');
 }
 
 export interface PurchaseInput {
@@ -24,6 +37,7 @@ export interface PurchaseListItem {
   color: string | null;
   unit: string;
   qty: string;
+  kind: 'item' | 'product';
 }
 
 export interface PurchaseListRow {
@@ -43,6 +57,43 @@ export interface PurchaseEditInput {
   bill_no?: string | null;
   purchase_date?: string | null;
   items?: PurchaseItemInput[];
+}
+
+/** Write one purchase line plus its inbound stock movement, on the correct side. */
+async function insertLine(
+  client: { query: (sql: string, params?: unknown[]) => Promise<unknown> },
+  purchaseId: number,
+  vendorId: number,
+  movedOn: string | null,
+  it: PurchaseItemInput,
+): Promise<void> {
+  const amount = it.amount ?? Number((it.qty * it.rate).toFixed(2));
+
+  if (lineKind(it) === 'product') {
+    await client.query(
+      `INSERT INTO purchase_items (purchase_id, product_id, product_variant_id, unit, qty, rate, amount)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [purchaseId, it.product_id, it.variant_id ?? null, it.unit, it.qty, it.rate, amount],
+    );
+    // Bought-in finished goods land in finished stock, tagged with the source vendor.
+    await client.query(
+      `INSERT INTO finished_stock_movements (product_id, variant_id, qty, reason, ref_id, vendor_id, moved_on)
+       VALUES ($1,$2,$3,'purchase',$4,$5, COALESCE($6, CURRENT_DATE))`,
+      [it.product_id, it.variant_id ?? null, it.qty, purchaseId, vendorId, movedOn],
+    );
+    return;
+  }
+
+  await client.query(
+    `INSERT INTO purchase_items (purchase_id, item_id, variant_id, unit, qty, rate, amount)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [purchaseId, it.item_id, it.variant_id ?? null, it.unit, it.qty, it.rate, amount],
+  );
+  await client.query(
+    `INSERT INTO stock_movements (item_id, variant_id, unit, qty, reason, ref_id, vendor_id, moved_on)
+     VALUES ($1,$2,$3,$4,'purchase',$5,$6, COALESCE($7, CURRENT_DATE))`,
+    [it.item_id, it.variant_id ?? null, it.unit, it.qty, purchaseId, vendorId, movedOn],
+  );
 }
 
 export const purchasesRepo = {
@@ -70,17 +121,7 @@ export const purchasesRepo = {
       const purchaseId = rows[0]!.id;
 
       for (const it of items) {
-        await client.query(
-          `INSERT INTO purchase_items (purchase_id, item_id, variant_id, unit, qty, rate, amount)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-          [purchaseId, it.item_id, it.variant_id ?? null, it.unit, it.qty, it.rate, it.amount],
-        );
-        // Inbound raw-material stock movement, tagged with the source vendor.
-        await client.query(
-          `INSERT INTO stock_movements (item_id, variant_id, unit, qty, reason, ref_id, vendor_id, moved_on)
-           VALUES ($1,$2,$3,$4,'purchase',$5,$6, COALESCE($7, CURRENT_DATE))`,
-          [it.item_id, it.variant_id ?? null, it.unit, it.qty, purchaseId, input.vendor_id, input.purchase_date ?? null],
-        );
+        await insertLine(client, purchaseId, input.vendor_id, input.purchase_date ?? null, it);
       }
 
       return { id: purchaseId };
@@ -135,10 +176,18 @@ export const purchasesRepo = {
     const itemsByPurchase = new Map<number, PurchaseListItem[]>();
     if (ids.length) {
       const itemRows = await query<PurchaseListItem & { purchase_id: number }>(
-        `SELECT pi.purchase_id, i.name, iv.color, pi.unit, pi.qty
+        // LEFT JOINs on both sides — an inner join on items would silently drop
+        // finished-product lines.
+        `SELECT pi.purchase_id,
+                COALESCE(i.name, pr.name) AS name,
+                COALESCE(iv.color, pv.variant) AS color,
+                pi.unit, pi.qty,
+                CASE WHEN pi.product_id IS NOT NULL THEN 'product' ELSE 'item' END AS kind
          FROM purchase_items pi
-         JOIN items i ON i.id = pi.item_id
+         LEFT JOIN items i ON i.id = pi.item_id
          LEFT JOIN item_variants iv ON iv.id = pi.variant_id
+         LEFT JOIN products pr ON pr.id = pi.product_id
+         LEFT JOIN product_variants pv ON pv.id = pi.product_variant_id
          WHERE pi.purchase_id = ANY($1)
          ORDER BY pi.id`,
         [ids],
@@ -168,11 +217,18 @@ export const purchasesRepo = {
     if (!head.rows[0]) return null;
 
     const items = await query(
-      `SELECT pi.id, pi.item_id, i.name AS item_name, pi.variant_id, iv.color,
+      `SELECT pi.id,
+              CASE WHEN pi.product_id IS NOT NULL THEN 'product' ELSE 'item' END AS kind,
+              pi.item_id, pi.product_id,
+              COALESCE(pi.variant_id, pi.product_variant_id) AS variant_id,
+              COALESCE(i.name, pr.name) AS item_name,
+              COALESCE(iv.color, pv.variant) AS color,
               pi.unit, pi.qty, pi.rate, pi.amount
        FROM purchase_items pi
-       JOIN items i ON i.id = pi.item_id
+       LEFT JOIN items i ON i.id = pi.item_id
        LEFT JOIN item_variants iv ON iv.id = pi.variant_id
+       LEFT JOIN products pr ON pr.id = pi.product_id
+       LEFT JOIN product_variants pv ON pv.id = pi.product_variant_id
        WHERE pi.purchase_id = $1 ORDER BY pi.id`,
       [id],
     );
@@ -186,6 +242,10 @@ export const purchasesRepo = {
       if (!ex.rows[0]) return false;
       await client.query(
         `DELETE FROM stock_movements WHERE ref_id = $1 AND reason = 'purchase'`,
+        [id],
+      );
+      await client.query(
+        `DELETE FROM finished_stock_movements WHERE ref_id = $1 AND reason = 'purchase'`,
         [id],
       );
       await client.query(`DELETE FROM purchase_items WHERE purchase_id = $1`, [id]);
@@ -225,27 +285,21 @@ export const purchasesRepo = {
         const vendorId = input.vendor_id ?? ex.rows[0].vendor_id;
         const movedOn = input.purchase_date ?? ex.rows[0].purchase_date;
 
+        // Both sides are reversed — a line's kind may have changed on edit.
         await client.query(
           `DELETE FROM stock_movements WHERE ref_id = $1 AND reason = 'purchase'`,
+          [id],
+        );
+        await client.query(
+          `DELETE FROM finished_stock_movements WHERE ref_id = $1 AND reason = 'purchase'`,
           [id],
         );
         await client.query(`DELETE FROM purchase_items WHERE purchase_id = $1`, [id]);
 
         let total = 0;
         for (const it of input.items) {
-          const amount = it.amount ?? Number((it.qty * it.rate).toFixed(2));
-          total += amount;
-          await client.query(
-            `INSERT INTO purchase_items (purchase_id, item_id, variant_id, unit, qty, rate, amount)
-             VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-            [id, it.item_id, it.variant_id ?? null, it.unit, it.qty, it.rate, amount],
-          );
-          // Inbound raw-material stock movement, tagged with the source vendor.
-          await client.query(
-            `INSERT INTO stock_movements (item_id, variant_id, unit, qty, reason, ref_id, vendor_id, moved_on)
-             VALUES ($1,$2,$3,$4,'purchase',$5,$6, COALESCE($7, CURRENT_DATE))`,
-            [it.item_id, it.variant_id ?? null, it.unit, it.qty, id, vendorId, movedOn],
-          );
+          total += it.amount ?? Number((it.qty * it.rate).toFixed(2));
+          await insertLine(client, id, vendorId, movedOn, it);
         }
 
         await client.query(`UPDATE purchases SET total_amount = $2 WHERE id = $1`, [id, total]);

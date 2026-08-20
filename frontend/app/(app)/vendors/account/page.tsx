@@ -19,7 +19,7 @@ import { PurchaseModal } from "@/components/purchase-modal";
 import { PayVendorModal } from "@/components/pay-vendor-modal";
 
 interface VendorLite { id: number; name: string; phone: string | null; city: string | null }
-interface BillItem { name: string; color: string | null; unit: string; qty: string }
+interface BillItem { name: string; color: string | null; unit: string; qty: string; kind: "item" | "product" }
 interface PayLine { id: number; date: string; method: string | null; amount: number; advance: boolean }
 interface Bill {
   id: number;
@@ -257,6 +257,11 @@ export default function VendorAccountPage() {
                                     {it.name}
                                     {it.color ? <span className="text-muted"> ({it.color})</span> : null}
                                     <span className="text-muted"> · {fmtQty(it.qty)} {it.unit}</span>
+                                    {it.kind === "product" && (
+                                      <span className="ml-1.5 rounded bg-[color:var(--success-tint)] px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-[color:var(--success)]">
+                                        Finished
+                                      </span>
+                                    )}
                                   </span>
                                 ))}
                               </div>

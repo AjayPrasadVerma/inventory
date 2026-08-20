@@ -232,9 +232,15 @@ reportsRouter.get(
     const [purchases, issues, receipts, returns, payments, adjustments] = await Promise.all([
       query(
         `SELECT p.id, v.name AS party, p.bill_no, p.total_amount AS amount,
-                (SELECT json_agg(json_build_object('name', i.name, 'variant', iv.color, 'unit', pi.unit, 'qty', pi.qty) ORDER BY pi.id)
-                   FROM purchase_items pi JOIN items i ON i.id = pi.item_id
+                (SELECT json_agg(json_build_object(
+                          'name', COALESCE(i.name, pr.name),
+                          'variant', COALESCE(iv.color, pv.variant),
+                          'unit', pi.unit, 'qty', pi.qty) ORDER BY pi.id)
+                   FROM purchase_items pi
+                   LEFT JOIN items i ON i.id = pi.item_id
                    LEFT JOIN item_variants iv ON iv.id = pi.variant_id
+                   LEFT JOIN products pr ON pr.id = pi.product_id
+                   LEFT JOIN product_variants pv ON pv.id = pi.product_variant_id
                   WHERE pi.purchase_id = p.id) AS lines
          FROM purchases p JOIN vendors v ON v.id = p.vendor_id
          WHERE p.purchase_date = COALESCE($1::date, CURRENT_DATE)

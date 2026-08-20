@@ -8,14 +8,25 @@ import { purchasesRepo } from './purchases.repo.js';
 export const purchasesRouter = Router();
 purchasesRouter.use(requireAuth);
 
+/**
+ * A line is either a raw material or a bought-in finished product. `kind` defaults
+ * to 'item' so existing callers keep working, and the refinement rejects a line
+ * that names neither (or both) before it reaches the DB's CHECK.
+ */
 const purchaseItemSchema = z.object({
-  item_id: z.coerce.number().int().positive(),
+  kind: z.enum(['item', 'product']).default('item'),
+  item_id: z.coerce.number().int().positive().optional().nullable(),
+  product_id: z.coerce.number().int().positive().optional().nullable(),
   variant_id: z.coerce.number().int().positive().optional().nullable(),
   unit: z.string().trim().min(1).max(30),
   qty: z.coerce.number().positive('Quantity must be greater than 0').max(1_000_000),
   rate: z.coerce.number().nonnegative().max(1_000_000_000).default(0),
   amount: z.coerce.number().nonnegative().max(1_000_000_000).optional(),
-});
+}).refine(
+  (l) => (l.kind === 'product' ? l.product_id != null && l.item_id == null
+                               : l.item_id != null && l.product_id == null),
+  { message: 'Each line needs exactly one of item_id / product_id, matching its kind.' },
+);
 
 const purchaseSchema = z.object({
   vendor_id: z.coerce.number().int().positive('Select a vendor'),
