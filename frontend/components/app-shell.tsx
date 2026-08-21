@@ -32,6 +32,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return href === "/" ? pathname === "/" : pathname.startsWith(href);
   }
 
+  // The dashboard has no PageHeader, so its slot bar would just be an empty strip.
+  const showPageBar = pathname !== "/";
+
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       {/* Top navbar: brand + horizontal nav + user menu */}
@@ -76,10 +79,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </header>
 
       {/* Slim page bar — PageHeader portals its title/actions in here */}
-      <div className="z-20 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-surface px-3 sm:px-4 lg:px-5">
-        <div id="topbar-title" className="min-w-0 flex-1" />
-        <div id="topbar-actions" className="flex shrink-0 items-center gap-2" />
-      </div>
+      {showPageBar && (
+        <div className="z-20 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-surface px-3 sm:px-4 lg:px-5">
+          <div id="topbar-title" className="min-w-0 flex-1" />
+          <div id="topbar-actions" className="flex shrink-0 items-center gap-2" />
+        </div>
+      )}
 
       {/* Mobile drawer */}
       {open && (

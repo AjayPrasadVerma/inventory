@@ -2,23 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  LabelList,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { api } from "@/lib/api";
 import { qty as fmtQty } from "@/lib/utils";
-import { useAuth } from "@/lib/auth";
 import { Badge, Card, Spinner } from "@/components/ui/misc";
-import { PageHeader } from "@/components/page-parts";
 import { Icon } from "@/components/icons";
+import { DayActivity } from "@/components/day-activity";
 
 type Tone = "primary" | "accent" | "success" | "warning" | "danger";
 const TINT: Record<Tone, { bg: string; fg: string }> = {
@@ -29,7 +17,6 @@ const TINT: Record<Tone, { bg: string; fg: string }> = {
   danger: { bg: "var(--danger-tint)", fg: "var(--danger)" },
 };
 const HEALTH = { low: "#e0a03a", oversold: "#e0664f" } as const;
-const PALETTE = ["#4f5ac0", "#3aa0c9", "#5bbfa3", "#8b7cd8", "#4fb07f", "#5b8def", "#a06cd0", "#2e9e8f", "#7c9cbf", "#c07fb0"];
 
 interface CatValue { label: string; value: number }
 interface ServerAttn { kind: "Raw" | "Finished"; name: string; variant: string | null; unit: string | null; on_hand: string; status: "Low" | "Oversold" }
@@ -50,13 +37,10 @@ interface Dashboard {
   attention: ServerAttn[];
 }
 
-interface CatDatum { label: string; value: number; fill: string }
 interface AttnItem { kind: "Raw" | "Finished"; name: string; sub: string; on_hand: number; status: "Low" | "Oversold" }
 
-const withColor = (rows: CatValue[]): CatDatum[] => rows.map((r, i) => ({ ...r, fill: PALETTE[i % PALETTE.length] }));
 
 export default function DashboardPage() {
-  const { user } = useAuth();
   const [data, setData] = useState<Dashboard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -72,8 +56,6 @@ export default function DashboardPage() {
 
   const finishedTotal = data?.finishedTotal ?? 0;
   const rawLines = useMemo(() => (data?.rawByCategory ?? []).reduce((s, r) => s + r.value, 0), [data]);
-  const finishedByCat = useMemo<CatDatum[]>(() => withColor(data?.finishedByCategory ?? []), [data]);
-  const rawByCat = useMemo<CatDatum[]>(() => withColor(data?.rawByCategory ?? []), [data]);
   const attention = useMemo<AttnItem[]>(
     () =>
       (data?.attention ?? []).map((x) => ({
@@ -87,9 +69,7 @@ export default function DashboardPage() {
   );
 
   return (
-    <div className="mx-auto max-w-7xl">
-      <PageHeader title={`Welcome back, ${user?.name ?? ""}`.trim()} subtitle="Today's activity and stock at a glance." />
-
+    <div className="w-full">
       {error && <p className="mb-4 text-sm text-[color:var(--danger)]">{error}</p>}
 
       {loading ? (
@@ -104,23 +84,11 @@ export default function DashboardPage() {
             <Hero label="Open Jobs" value={data?.openJobs ?? 0} hint="Material out with karigars" icon={<Icon.Job />} tone="warning" href="/karigars" />
           </div>
 
-          {/* Category overview */}
-          <div className="grid gap-4 lg:grid-cols-2">
-            <CategoryChart title="Finished Goods by Category" subtitle="Pieces on hand" unit="pcs" href="/reports/finished-stock" data={finishedByCat} />
-            <CategoryChart title="Raw Materials by Category" subtitle="Stock lines per category" unit="lines" href="/reports/raw-stock" data={rawByCat} />
-          </div>
+          {/* What happened on a given day — the detail behind the KPIs above. */}
+          <DayActivity />
 
           {/* Needs attention — the actionable list */}
           <AttentionList items={attention} />
-
-          {/* Today */}
-          <div>
-            <SectionTitle>Today</SectionTitle>
-            <div className="grid grid-cols-2 gap-3">
-              <Mini label="Purchases" value={data?.purchasesToday ?? 0} hint="Recorded" icon={<Icon.Purchase />} tone="primary" href="/vendors" />
-              <Mini label="Material Issued" value={data?.issuesToday ?? 0} hint="To karigars" icon={<Icon.Karigar />} tone="warning" href="/reports/karigar-issued" />
-            </div>
-          </div>
 
           {/* Quick actions */}
           <div>
@@ -133,70 +101,6 @@ export default function DashboardPage() {
         </div>
       )}
     </div>
-  );
-}
-
-function CatTooltip({ active, payload, unit }: { active?: boolean; payload?: { payload: CatDatum }[]; unit?: string }) {
-  if (!active || !payload?.length) return null;
-  const d = payload[0].payload;
-  return (
-    <div className="rounded-lg border border-border bg-surface px-3 py-2 text-xs shadow-[var(--shadow-md)]">
-      <p className="font-semibold text-ink">{d.label}</p>
-      <p className="mt-0.5 text-sm font-bold tabular-nums text-ink">
-        {fmtQty(d.value)} <span className="text-xs font-normal text-muted">{unit}</span>
-      </p>
-    </div>
-  );
-}
-
-/** Keep the chart readable with any number of categories: top N + an "Others" bucket. */
-function capCategories(data: CatDatum[], n = 8): CatDatum[] {
-  if (data.length <= n + 1) return data;
-  const top = data.slice(0, n);
-  const rest = data.slice(n).reduce((s, d) => s + d.value, 0);
-  return [...top, { label: "Others", value: rest, fill: "#9aa0b8" }];
-}
-
-function CategoryChart({ title, subtitle, unit, href, data }: { title: string; subtitle: string; unit: string; href: string; data: CatDatum[] }) {
-  const shown = capCategories(data);
-  return (
-    <Card className="p-4">
-      <div className="mb-3 flex items-start justify-between">
-        <div>
-          <p className="text-sm font-semibold text-ink">{title}</p>
-          <p className="text-xs text-muted">{subtitle}{data.length > shown.length ? ` · top ${shown.length - 1} shown` : ""}</p>
-        </div>
-        <Link href={href} className="shrink-0 text-xs font-medium text-primary hover:underline">View all →</Link>
-      </div>
-      {data.length === 0 ? (
-        <p className="py-12 text-center text-sm text-muted">No stock recorded yet.</p>
-      ) : (
-        <ResponsiveContainer width="100%" height={260}>
-          <BarChart data={shown} margin={{ top: 20, right: 8, bottom: 4, left: 0 }} barCategoryGap="24%">
-            <CartesianGrid vertical={false} stroke="var(--border)" />
-            <XAxis
-              dataKey="label"
-              interval={0}
-              tick={{ fontSize: 11, fill: "var(--muted)" }}
-              tickLine={false}
-              axisLine={{ stroke: "var(--border)" }}
-              angle={shown.length > 5 ? -30 : 0}
-              textAnchor={shown.length > 5 ? "end" : "middle"}
-              height={shown.length > 5 ? 64 : 30}
-              tickFormatter={(v: string) => (v.length > 12 ? `${v.slice(0, 11)}…` : v)}
-            />
-            <YAxis width={40} tick={{ fontSize: 11, fill: "var(--muted)" }} tickLine={false} axisLine={false} />
-            <Tooltip content={<CatTooltip unit={unit} />} cursor={{ fill: "var(--surface-2)", opacity: 0.5 }} />
-            <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={64} isAnimationActive={false}>
-              {shown.map((d, i) => (
-                <Cell key={i} fill={d.fill} />
-              ))}
-              <LabelList dataKey="value" position="top" style={{ fontSize: 12, fontWeight: 700, fill: "var(--ink)" }} formatter={(v: unknown) => fmtQty(Number(v))} />
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      )}
-    </Card>
   );
 }
 
@@ -252,20 +156,6 @@ function Hero({ label, value, hint, icon, tone, href }: { label: string; value: 
           {hint && <p className="mt-0.5 text-xs text-muted">{hint}</p>}
         </div>
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-white" style={{ background: c.fg }}>{icon}</span>
-      </div>
-    </Link>
-  );
-}
-
-function Mini({ label, value, hint, icon, tone, href }: { label: string; value: React.ReactNode; hint?: string; icon: React.ReactNode; tone: Tone; href: string }) {
-  const c = TINT[tone];
-  return (
-    <Link href={href} className="soft-card flex items-center gap-3 p-3 transition-colors hover:border-border-strong hover:bg-surface-2">
-      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg" style={{ background: c.bg, color: c.fg }}>{icon}</span>
-      <div className="min-w-0">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted">{label}</p>
-        <p className="truncate text-lg font-semibold text-ink">{value}</p>
-        {hint && <p className="text-[11px] text-muted">{hint}</p>}
       </div>
     </Link>
   );
