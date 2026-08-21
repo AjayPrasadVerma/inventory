@@ -10,12 +10,14 @@ jobsRouter.use(requireAuth);
 
 const issueSchema = z.object({
   item_id: z.coerce.number().int().positive(),
+  issued_on: pastOrTodayDateSchema.optional().nullable(),
   variant_id: z.coerce.number().int().positive().optional().nullable(),
   unit: z.string().trim().min(1).max(30),
   qty: z.coerce.number().positive('Quantity must be greater than 0').max(1_000_000),
 });
 const receiptSchema = z.object({
   product_id: z.coerce.number().int().positive(),
+  received_on: pastOrTodayDateSchema.optional().nullable(),
   variant_id: z.coerce.number().int().positive().optional().nullable(),
   qty: z.coerce.number().positive('Quantity must be greater than 0').max(1_000_000),
 });
@@ -121,6 +123,7 @@ jobsRouter.patch(
       expected_note: z.string().trim().max(2000).optional().nullable(),
       issues: z.array(issueSchema).max(200, 'Too many items').optional(),
       receipts: z.array(receiptSchema).max(200, 'Too many items').optional(),
+      returns: z.array(issueSchema).max(200, 'Too many items').optional(),
     }).parse(req.body);
     const ok = await jobsRepo.editJob(id, body);
     if (!ok) throw new AppError(404, 'Job not found');

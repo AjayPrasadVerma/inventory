@@ -352,6 +352,8 @@ export interface PricedItemOpt {
 }
 export interface PricedLine {
   key: number;
+  /** Which catalogue the line is picked from — only used when `kinds` is passed. */
+  kind: string;
   itemId: string;
   variantId: string;
   unit: string;
@@ -359,8 +361,15 @@ export interface PricedLine {
   money: string;
 }
 
+/** One selectable catalogue for a line, e.g. raw materials vs finished products. */
+export interface PricedKind {
+  value: string;
+  label: string;
+  options: PricedItemOpt[];
+}
+
 let pricedSeq = 1;
-export const blankPricedLine = (): PricedLine => ({ key: pricedSeq++, itemId: "", variantId: "", unit: "", qty: "", money: "" });
+export const blankPricedLine = (kind = "item"): PricedLine => ({ key: pricedSeq++, kind, itemId: "", variantId: "", unit: "", qty: "", money: "" });
 
 export function pricedLineStatus(l: PricedLine, withUnit: boolean): "empty" | "complete" | "invalid" {
   const hasItem = !!l.itemId;
@@ -383,6 +392,7 @@ export function PricedRows({
   primaryPlaceholder,
   variantPlaceholder = "Variant…",
   invalidKeys,
+  kinds,
 }: {
   options: PricedItemOpt[];
   lines: PricedLine[];
@@ -393,29 +403,56 @@ export function PricedRows({
   primaryPlaceholder: string;
   variantPlaceholder?: string;
   invalidKeys?: Set<number>;
+  /** Pass to let each line choose its catalogue (raw material vs finished product). */
+  kinds?: PricedKind[];
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const byId = useMemo(() => new Map(options.map((o) => [o.id, o])), [options]);
-  const comboOptions = useMemo<ComboOption[]>(
-    () => options.map((o) => ({ value: String(o.id), label: o.name, sublabel: withUnit ? o.units?.join(" · ") : undefined })),
-    [options, withUnit],
-  );
 
-  const grid = withUnit
-    ? "grid grid-cols-[2rem_minmax(0,1fr)_7.5rem_5.5rem_5rem_6rem_6.5rem_2.25rem] items-center gap-2"
-    : "grid grid-cols-[2rem_minmax(0,1fr)_9rem_5.5rem_6.5rem_7rem_2.25rem] items-center gap-2";
-  const minW = withUnit ? "min-w-[720px]" : "min-w-[640px]";
+  /** id → option, per kind, so a line only resolves against its own catalogue. */
+  const byKind = useMemo(() => {
+    const list = kinds ?? [{ value: "item", label: primaryLabel, options }];
+    return new Map(list.map((k) => [
+      k.value,
+      {
+        byId: new Map(k.options.map((o) => [o.id, o])),
+        combo: k.options.map((o) => ({
+          value: String(o.id),
+          label: o.name,
+          sublabel: o.units?.length ? o.units.join(" · ") : undefined,
+        })) as ComboOption[],
+      },
+    ]));
+  }, [kinds, options, primaryLabel]);
+
+  // Written out in full: Tailwind scans source text, so a class assembled from
+  // a template literal is never emitted and the rows collapse to one column.
+  const grid = kinds
+    ? withUnit
+      ? "grid grid-cols-[2rem_8.5rem_minmax(0,1fr)_7.5rem_5.5rem_5rem_6rem_6.5rem_2.25rem] items-center gap-2"
+      : "grid grid-cols-[2rem_8.5rem_minmax(0,1fr)_9rem_5.5rem_6.5rem_7rem_2.25rem] items-center gap-2"
+    : withUnit
+      ? "grid grid-cols-[2rem_minmax(0,1fr)_7.5rem_5.5rem_5rem_6rem_6.5rem_2.25rem] items-center gap-2"
+      : "grid grid-cols-[2rem_minmax(0,1fr)_9rem_5.5rem_6.5rem_7rem_2.25rem] items-center gap-2";
+  const minW = kinds ? "min-w-[840px]" : withUnit ? "min-w-[720px]" : "min-w-[640px]";
 
   function patch(key: number, p: Partial<PricedLine>) {
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...p } : l)));
   }
   function appendBlank() {
-    setLines((ls) => [...ls, blankPricedLine()]);
+    setLines((ls) => [...ls, blankPricedLine(kinds?.[0]?.value ?? "item")]);
   }
-  function onPrimary(key: number, itemId: string, isLast: boolean) {
-    const item = byId.get(Number(itemId));
-    patch(key, { itemId, variantId: "", unit: withUnit ? item?.units?.[0] ?? "" : "" });
+  function onPrimary(key: number, kind: string, itemId: string, isLast: boolean) {
+    const item = byKind.get(kind)?.byId.get(Number(itemId));
+    // A catalogue with no units is counted in pieces — fill it in so the line is
+    // complete without asking for a unit that has only one possible value.
+    const unit = withUnit ? (item?.units?.length ? item.units[0]! : "pcs") : "";
+    patch(key, { itemId, variantId: "", unit });
     if (itemId && isLast) appendBlank();
+  }
+
+  /** Switching a line's catalogue clears the pick — ids are not comparable across kinds. */
+  function onKind(key: number, kind: string) {
+    patch(key, { kind, itemId: "", variantId: "", unit: "" });
   }
   function onMoneyEnter(rowIndex: number, isLast: boolean) {
     if (isLast) {
@@ -436,6 +473,7 @@ export function PricedRows({
           {/* header */}
           <div className={`${grid} border-b border-border bg-surface-2 px-3 py-2 text-[10.5px] font-semibold uppercase tracking-wide text-muted`}>
             <span>#</span>
+            {kinds && <span>Type</span>}
             <span>{primaryLabel}</span>
             <span>{withUnit ? "Color" : "Variant"}</span>
             {withUnit && <span>Unit</span>}
@@ -448,19 +486,25 @@ export function PricedRows({
           {/* rows */}
           <div ref={containerRef} className="max-h-[42vh] overflow-y-auto">
             {lines.map((l, idx) => {
-              const item = byId.get(Number(l.itemId));
+              const cat = byKind.get(l.kind) ?? [...byKind.values()][0]!;
+              const item = cat.byId.get(Number(l.itemId));
               const isLast = idx === lines.length - 1;
               const invalid = invalidKeys?.has(l.key);
               const amt = (Number(l.qty) || 0) * (Number(l.money) || 0);
               return (
                 <div key={l.key} className={`${grid} px-3 py-1.5 border-b border-border last:border-b-0 ${invalid ? "bg-[color:var(--danger-tint)]" : ""}`}>
                   <span className="text-xs tabular-nums text-muted">{idx + 1}</span>
+                  {kinds && (
+                    <Select dense value={l.kind} onChange={(e) => onKind(l.key, e.target.value)} aria-label={`Type for row ${idx + 1}`}>
+                      {kinds.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
+                    </Select>
+                  )}
                   <div data-row-search>
                     <Combobox
                       size="sm"
-                      options={comboOptions}
+                      options={cat.combo}
                       value={l.itemId}
-                      onChange={(v) => onPrimary(l.key, v, isLast)}
+                      onChange={(v) => onPrimary(l.key, l.kind, v, isLast)}
                       placeholder={primaryPlaceholder}
                       invalid={invalid && !l.itemId}
                       ariaLabel={`${primaryLabel} for row ${idx + 1}`}
@@ -481,12 +525,13 @@ export function PricedRows({
                       dense
                       value={l.unit}
                       onChange={(e) => patch(l.key, { unit: e.target.value })}
-                      disabled={!item}
+                      disabled={!item || !item.units?.length}
                       invalid={invalid && !!l.itemId && !l.unit}
                       aria-label="Unit"
                     >
-                      <option value="">Unit</option>
-                      {item?.units?.map((u) => <option key={u} value={u}>{u}</option>)}
+                      {item && !item.units?.length
+                        ? <option value="pcs">pcs</option>
+                        : <><option value="">Unit</option>{item?.units?.map((u) => <option key={u} value={u}>{u}</option>)}</>}
                     </Select>
                   )}
                   <Input

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { cachedGet } from "@/lib/cache";
 import { formatDate, qty as fmtQty, rupees, todayISO } from "@/lib/utils";
@@ -19,7 +20,16 @@ interface LedgerData {
 
 export default function CustomerAccountPage() {
   const [customers, setCustomers] = useState<CustomerLite[]>([]);
-  const [customerId, setCustomerId] = useState("");
+  const router = useRouter();
+  const params = useSearchParams();
+  // The record on screen comes from the URL, not from local state: the command
+  // palette navigates by changing only ?c=, which does not remount this segment,
+  // so anything read once on mount would ignore it.
+  const customerId = params.get("c") ?? "";
+  const setCustomerId = useCallback(
+    (id: string) => router.replace(id ? `?c=${id}` : "?", { scroll: false }),
+    [router],
+  );
   const [ledger, setLedger] = useState<LedgerData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,8 +46,6 @@ export default function CustomerAccountPage() {
     cachedGet<{ data: CustomerLite[] }>("/customers/options")
       .then((r) => {
         setCustomers(r.data);
-        const preset = new URLSearchParams(window.location.search).get("c");
-        if (preset && r.data.some((c) => String(c.id) === preset)) setCustomerId(preset);
       })
       .catch((e) => setError((e as Error).message));
   }, []);
@@ -56,7 +64,6 @@ export default function CustomerAccountPage() {
   useEffect(() => {
     if (!customerId) return; // render guards on !customerId, so stale data is never shown
     // Keep the URL shareable/refresh-safe without a full navigation.
-    window.history.replaceState(null, "", `?c=${customerId}`);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- loads account data after a customer change
     return loadAccount(customerId);
   }, [customerId, loadAccount]);

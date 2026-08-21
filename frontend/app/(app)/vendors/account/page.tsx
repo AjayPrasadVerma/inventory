@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { bustCache, cachedGet } from "@/lib/cache";
 import { useAuth } from "@/lib/auth";
@@ -19,7 +20,7 @@ import { PurchaseModal } from "@/components/purchase-modal";
 import { PayVendorModal } from "@/components/pay-vendor-modal";
 
 interface VendorLite { id: number; name: string; phone: string | null; city: string | null }
-interface BillItem { name: string; color: string | null; unit: string; qty: string }
+interface BillItem { name: string; color: string | null; unit: string; qty: string; kind: "item" | "product" }
 interface PayLine { id: number; date: string; method: string | null; amount: number; advance: boolean }
 interface Bill {
   id: number;
@@ -48,8 +49,18 @@ export default function VendorAccountPage() {
   const { toast } = useToast();
   const isOwner = user?.role === "owner";
 
+  const router = useRouter();
+  const params = useSearchParams();
+  // Read the vendor from the URL rather than mirroring it into state: the palette
+  // navigates by changing only the query string, which does not remount this
+  // segment, so a mount-only read would ignore it.
+  const vendorId = params.get("v") ?? "";
+  const setVendorId = useCallback(
+    (id: string) => router.replace(id ? `?v=${id}` : "?", { scroll: false }),
+    [router],
+  );
+
   const [vendors, setVendors] = useState<VendorLite[]>([]);
-  const [vendorId, setVendorId] = useState("");
   const [vendor, setVendor] = useState<Vendor | null>(null);
   const [khata, setKhata] = useState<Khata | null>(null);
   const [loading, setLoading] = useState(false);
@@ -68,11 +79,7 @@ export default function VendorAccountPage() {
 
   useEffect(() => {
     cachedGet<{ data: VendorLite[] }>("/vendors/options")
-      .then((r) => {
-        setVendors(r.data);
-        const preset = new URLSearchParams(window.location.search).get("v");
-        if (preset && r.data.some((v) => String(v.id) === preset)) setVendorId(preset);
-      })
+      .then((r) => setVendors(r.data))
       .catch((e) => setError((e as Error).message));
   }, []);
 
@@ -95,7 +102,6 @@ export default function VendorAccountPage() {
 
   useEffect(() => {
     if (!vendorId) return;
-    window.history.replaceState(null, "", `?v=${vendorId}`);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- loads account data after a vendor change
     loadAccount(vendorId);
   }, [vendorId, loadAccount]);
@@ -257,6 +263,11 @@ export default function VendorAccountPage() {
                                     {it.name}
                                     {it.color ? <span className="text-muted"> ({it.color})</span> : null}
                                     <span className="text-muted"> · {fmtQty(it.qty)} {it.unit}</span>
+                                    {it.kind === "product" && (
+                                      <span className="ml-1.5 rounded bg-[color:var(--success-tint)] px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-[color:var(--success)]">
+                                        Finished
+                                      </span>
+                                    )}
                                   </span>
                                 ))}
                               </div>

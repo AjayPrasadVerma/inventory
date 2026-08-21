@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { cachedGet } from "@/lib/cache";
 import { formatDate, qty as fmtQty, todayISO } from "@/lib/utils";
@@ -21,7 +22,16 @@ interface StockData {
 
 export default function ProductStockPage() {
   const [products, setProducts] = useState<ProductLite[]>([]);
-  const [productId, setProductId] = useState("");
+  const router = useRouter();
+  const params = useSearchParams();
+  // The record on screen comes from the URL, not from local state: the command
+  // palette navigates by changing only ?p=, which does not remount this segment,
+  // so anything read once on mount would ignore it.
+  const productId = params.get("p") ?? "";
+  const setProductId = useCallback(
+    (id: string) => router.replace(id ? `?p=${id}` : "?", { scroll: false }),
+    [router],
+  );
   const [stock, setStock] = useState<StockData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,8 +48,6 @@ export default function ProductStockPage() {
     cachedGet<{ data: ProductLite[] }>("/products/options")
       .then((r) => {
         setProducts(r.data);
-        const preset = new URLSearchParams(window.location.search).get("p");
-        if (preset && r.data.some((it) => String(it.id) === preset)) setProductId(preset);
       })
       .catch((e) => setError((e as Error).message));
   }, []);
@@ -58,7 +66,6 @@ export default function ProductStockPage() {
   useEffect(() => {
     if (!productId) return; // render guards on !productId, so stale data is never shown
     // Keep the URL shareable/refresh-safe without a full navigation.
-    window.history.replaceState(null, "", `?p=${productId}`);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- loads stock data after a product change
     return loadStock(productId);
   }, [productId, loadStock]);

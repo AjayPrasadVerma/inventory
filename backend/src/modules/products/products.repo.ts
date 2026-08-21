@@ -160,7 +160,7 @@ export const productsRepo = {
     onHand: { variant: string | null; qty: number }[];
     entries: {
       date: string;
-      reason: 'job_receipt' | 'sale' | 'adjustment';
+      reason: 'job_receipt' | 'sale' | 'adjustment' | 'purchase';
       party: string | null;
       variant: string | null;
       qty: number;
@@ -183,7 +183,7 @@ export const productsRepo = {
 
     const entries = await query<{
       date: string;
-      reason: 'job_receipt' | 'sale' | 'adjustment';
+      reason: 'job_receipt' | 'sale' | 'adjustment' | 'purchase';
       party: string | null;
       variant: string | null;
       qty: number;
@@ -192,6 +192,8 @@ export const productsRepo = {
       `SELECT fsm.moved_on AS date, fsm.reason, fsm.qty::float8 AS qty, pv.variant, fsm.note,
               CASE WHEN fsm.reason = 'job_receipt' THEN k.name
                    WHEN fsm.reason = 'sale' THEN COALESCE(c.name, c.mobile, 'Walk-in')
+                   -- Bought-in finished goods: show the vendor they came from.
+                   WHEN fsm.reason = 'purchase' THEN v.name
                    ELSE NULL END AS party
        FROM finished_stock_movements fsm
        LEFT JOIN product_variants pv ON pv.id = fsm.variant_id
@@ -199,6 +201,7 @@ export const productsRepo = {
        LEFT JOIN karigars k ON k.id = j.karigar_id
        LEFT JOIN sales sa ON fsm.reason = 'sale' AND sa.id = fsm.ref_id
        LEFT JOIN customers c ON c.id = sa.customer_id
+       LEFT JOIN vendors v ON v.id = fsm.vendor_id
        WHERE fsm.product_id = $1
        ORDER BY fsm.moved_on, fsm.id`,
       [id],

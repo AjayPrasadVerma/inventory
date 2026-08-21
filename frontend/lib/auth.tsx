@@ -21,14 +21,13 @@ const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Whether we are waiting on /auth/me is known before the first paint: with no
+  // token there is nothing to wait for. Deciding it here rather than correcting
+  // it from an effect avoids a render pass that shows a spinner for no reason.
+  const [loading, setLoading] = useState(() => !!getToken());
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) {
-      setLoading(false);
-      return;
-    }
+    if (!getToken()) return;
     api<{ user: AuthUser }>("/auth/me")
       .then((r) => setUser(r.user))
       .catch(() => clearToken())

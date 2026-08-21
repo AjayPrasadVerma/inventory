@@ -1,18 +1,32 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { cn, roleLabel } from "@/lib/utils";
 import { Icon } from "./icons";
 
+/**
+ * Read the theme straight off <html class="dark"> instead of copying it into
+ * state. The class is external mutable state — the boot script in the layout and
+ * the command palette both write it — so a local copy goes stale the moment
+ * something else toggles. useSyncExternalStore is the supported way to subscribe.
+ */
+function useDarkClass(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      const ob = new MutationObserver(onChange);
+      ob.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+      return () => ob.disconnect();
+    },
+    () => document.documentElement.classList.contains("dark"),
+    () => false, // server render: the boot script has not run yet
+  );
+}
+
 export function UserMenu({ name, role, onLogout }: { name?: string; role?: string; onLogout: () => void }) {
   const [open, setOpen] = useState(false);
-  const [dark, setDark] = useState(false);
+  const dark = useDarkClass();
   const ref = useRef<HTMLDivElement>(null);
   const initials = (name ?? "?").split(" ").map((s) => s[0]).slice(0, 2).join("").toUpperCase();
-
-  useEffect(() => {
-    setDark(document.documentElement.classList.contains("dark"));
-  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -32,7 +46,6 @@ export function UserMenu({ name, role, onLogout }: { name?: string; role?: strin
 
   function toggleTheme() {
     const next = !dark;
-    setDark(next);
     document.documentElement.classList.toggle("dark", next);
     localStorage.setItem("dbw-theme", next ? "dark" : "light");
   }

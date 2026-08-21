@@ -45,7 +45,7 @@ export default function NewPurchasePage() {
 
   const loadOptions = useCallback(async () => {
     try {
-      const id = new URLSearchParams(window.location.search).get("edit");
+      const id = new URLSearchParams(window.location.search).get("edit"); // guards-allow: reached only by a fresh navigation from the purchases list; nothing links here from this same route
       setEditId(id);
       const [v, i] = await Promise.all([
         cachedGet<{ data: VendorOpt[] }>("/vendors/options"),

@@ -12,7 +12,7 @@ import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/misc";
 import {
   PricedRows, blankPricedLine, pricedLineStatus, pricedTotal,
-  type PricedItemOpt, type PricedLine,
+  type PricedItemOpt, type PricedKind, type PricedLine,
 } from "@/components/material-rows";
 
 interface RawItem {
@@ -20,6 +20,11 @@ interface RawItem {
   name: string;
   units: string[];
   variant_options: { id: number; color: string }[];
+}
+interface ProductOpt {
+  id: number;
+  name: string;
+  variant_options: { id: number; variant: string }[];
 }
 
 /** Add or edit a purchase for ONE vendor, straight from the vendor's account page. */
@@ -39,6 +44,7 @@ export function PurchaseModal({
 }) {
   const { toast } = useToast();
   const [items, setItems] = useState<PricedItemOpt[]>([]);
+  const [products, setProducts] = useState<PricedItemOpt[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -51,25 +57,37 @@ export function PurchaseModal({
 
   const load = useCallback(async () => {
     try {
-      const i = await cachedGet<{ data: RawItem[] }>("/items/options");
+      // Both catalogues: the shop may buy raw material or ready-made goods.
+      const [i, pr] = await Promise.all([
+        cachedGet<{ data: RawItem[] }>("/items/options"),
+        cachedGet<{ data: ProductOpt[] }>("/products/options"),
+      ]);
       const opts = i.data.map((it) => ({
         id: it.id,
         name: it.name,
         units: it.units,
         variants: it.variant_options.map((c) => ({ id: c.id, label: c.color })),
       }));
+      const prodOpts = pr.data.map((it) => ({
+        id: it.id,
+        name: it.name,
+        variants: it.variant_options.map((v) => ({ id: v.id, label: v.variant })),
+      }));
       if (purchaseId) {
         const res = await api<{ data: {
           bill_no: string | null; purchase_date: string; notes: string | null;
-          items: { item_id: number; variant_id: number | null; unit: string; qty: string; rate: string }[];
+          items: {
+            kind: "item" | "product"; item_id: number | null; product_id: number | null;
+            variant_id: number | null; unit: string; qty: string; rate: string;
+          }[];
         } }>(`/purchases/${purchaseId}`);
         const p = res.data;
         setBillNo(p.bill_no ?? "");
         setDate(p.purchase_date);
         setNotes(p.notes ?? "");
         setLines((p.items ?? []).map((it) => ({
-          ...blankPricedLine(),
-          itemId: String(it.item_id),
+          ...blankPricedLine(it.kind),
+          itemId: String(it.kind === "product" ? it.product_id : it.item_id),
           variantId: it.variant_id ? String(it.variant_id) : "",
           unit: it.unit,
           qty: String(Number(it.qty)),
@@ -77,6 +95,7 @@ export function PurchaseModal({
         })));
       }
       setItems(opts);
+      setProducts(prodOpts);
       setLoadError(null);
     } catch (e) {
       setLoadError((e as Error).message || "Could not load the form.");
@@ -89,6 +108,11 @@ export function PurchaseModal({
   useEffect(() => { load(); }, [load]);
 
   const total = pricedTotal(lines);
+
+  const kinds = useMemo<PricedKind[]>(() => [
+    { value: "item", label: "Raw material", options: items },
+    { value: "product", label: "Finished product", options: products },
+  ], [items, products]);
 
   const errors = useMemo(() => {
     const invalidKeys = new Set<number>();
@@ -112,7 +136,10 @@ export function PurchaseModal({
       const payloadItems = lines
         .filter((l) => pricedLineStatus(l, true) === "complete")
         .map((l) => ({
-          item_id: Number(l.itemId),
+          kind: l.kind === "product" ? "product" as const : "item" as const,
+          ...(l.kind === "product"
+            ? { product_id: Number(l.itemId) }
+            : { item_id: Number(l.itemId) }),
           variant_id: l.variantId ? Number(l.variantId) : null,
           unit: l.unit,
           qty: Number(l.qty),
@@ -145,7 +172,7 @@ export function PurchaseModal({
     <Modal
       open
       onClose={onClose}
-      size="xl"
+      size="page"
       title={purchaseId ? `Edit purchase — ${vendorName}` : `New purchase — ${vendorName}`}
       footer={(close) => (
         <>
@@ -186,9 +213,10 @@ export function PurchaseModal({
               setLines={setLines}
               withUnit
               moneyLabel="Rate"
-              primaryLabel="Item"
-              primaryPlaceholder="Search item…"
+              primaryLabel="Name"
+              primaryPlaceholder="Search…"
               variantPlaceholder="Color…"
+              kinds={kinds}
               invalidKeys={show ? errors.invalidKeys : undefined}
             />
             {show && errors.itemErr && (

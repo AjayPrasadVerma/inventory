@@ -128,7 +128,7 @@ export const vendorsRepo = {
       date: string;
       bill_no: string | null;
       total: number;
-      items: { name: string; color: string | null; unit: string; qty: string }[];
+      items: { name: string; color: string | null; unit: string; qty: string; kind: 'item' | 'product' }[];
       payments: { id: number; date: string; method: string | null; amount: number; advance: boolean }[];
       paid: number;
       remaining: number;
@@ -157,21 +157,28 @@ export const vendorsRepo = {
       [id],
     )).rows;
 
-    const itemRows = (await query<{ purchase_id: number; name: string; color: string | null; unit: string; qty: string }>(
-      `SELECT pi.purchase_id, i.name, iv.color, pi.unit, pi.qty
+    const itemRows = (await query<{ purchase_id: number; name: string; color: string | null; unit: string; qty: string; kind: 'item' | 'product' }>(
+      // LEFT JOINs on both sides — a bought-in finished product is a valid line too.
+      `SELECT pi.purchase_id,
+              COALESCE(i.name, pr.name) AS name,
+              COALESCE(iv.color, pv.variant) AS color,
+              pi.unit, pi.qty,
+              CASE WHEN pi.product_id IS NOT NULL THEN 'product' ELSE 'item' END AS kind
        FROM purchase_items pi
        JOIN purchases p ON p.id = pi.purchase_id
-       JOIN items i ON i.id = pi.item_id
+       LEFT JOIN items i ON i.id = pi.item_id
        LEFT JOIN item_variants iv ON iv.id = pi.variant_id
+       LEFT JOIN products pr ON pr.id = pi.product_id
+       LEFT JOIN product_variants pv ON pv.id = pi.product_variant_id
        WHERE p.vendor_id = $1
        ORDER BY pi.id`,
       [id],
     )).rows;
 
-    const itemsBy = new Map<number, { name: string; color: string | null; unit: string; qty: string }[]>();
+    const itemsBy = new Map<number, { name: string; color: string | null; unit: string; qty: string; kind: 'item' | 'product' }[]>();
     for (const r of itemRows) {
       const list = itemsBy.get(r.purchase_id) ?? [];
-      list.push({ name: r.name, color: r.color, unit: r.unit, qty: r.qty });
+      list.push({ name: r.name, color: r.color, unit: r.unit, qty: r.qty, kind: r.kind });
       itemsBy.set(r.purchase_id, list);
     }
 
@@ -235,12 +242,20 @@ export const vendorsRepo = {
     )).rows;
 
     const materials = (await query<{ name: string; color: string | null; unit: string; qty: string; amount: string }>(
-      `SELECT i.name, iv.color, pi.unit, SUM(pi.qty) AS qty, SUM(pi.amount) AS amount
+      // LEFT JOINs over both catalogues: a line is either a raw material or a
+      // bought-in finished product, so an inner join drops one kind entirely and
+      // the material table stops reconciling with its own total.
+      `SELECT COALESCE(i.name, pr.name) AS name,
+              COALESCE(iv.color, pv.variant) AS color,
+              pi.unit, SUM(pi.qty) AS qty, SUM(pi.amount) AS amount
        FROM purchase_items pi JOIN purchases p ON p.id = pi.purchase_id
-       JOIN items i ON i.id = pi.item_id
+       LEFT JOIN items i ON i.id = pi.item_id
        LEFT JOIN item_variants iv ON iv.id = pi.variant_id
+       LEFT JOIN products pr ON pr.id = pi.product_id
+       LEFT JOIN product_variants pv ON pv.id = pi.product_variant_id
        WHERE p.vendor_id = $1
-       GROUP BY i.name, iv.color, pi.unit ORDER BY i.name, iv.color`,
+       GROUP BY COALESCE(i.name, pr.name), COALESCE(iv.color, pv.variant), pi.unit
+       ORDER BY 1, 2`,
       [id],
     )).rows;
 
