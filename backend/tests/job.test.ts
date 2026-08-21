@@ -4,14 +4,20 @@
  * reversed returned material, and a delete that had to reverse money too.
  */
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from 'vitest';
-import { migrate, reset, pool, query } from './helpers/db.js';
+import { setupSchema, resetTransactions, pool, query } from './helpers/db.js';
 import { seedFixtures, rawOnHand, finishedOnHand, type Fixtures } from './helpers/fixtures.js';
 import { jobsRepo } from '../src/modules/jobs/jobs.repo.js';
 import { karigarsRepo } from '../src/modules/karigars/karigars.repo.js';
 
 let f: Fixtures;
-beforeAll(migrate);
-beforeEach(async () => { await reset(); f = await seedFixtures(); });
+
+// The catalogue is seeded once: truncating tables everything references needs
+// heavy locks, and every test only ever writes documents and movements.
+beforeAll(async () => {
+  await setupSchema();
+  f = await seedFixtures();
+});
+beforeEach(resetTransactions);
 afterAll(() => pool.end());
 
 const issue = (f: Fixtures, qty = 20) =>
@@ -56,12 +62,35 @@ describe('edit', () => {
     const job = await jobsRepo.create({ karigar_id: f.karigarId, job_date: '2026-06-01', issues: [issue(f)] } as never);
     await jobsRepo.addReceipt(job.id, [receipt(f, 8)], [], '2026-07-15');
 
-    await jobsRepo.editJob(job.id, { notes: 'touched', job_date: '2026-06-01' } as never);
+    // The edit form prefills from GET /jobs/:id and sends the receipts back, which
+    // is the path that used to rewrite received_on to job_date (or to today when
+    // job_date was absent). Restating the line must not move its date.
+    const existing = await query<{ received_on: string }>(
+      `SELECT received_on FROM job_receipts WHERE job_id = $1`, [job.id]);
+    await jobsRepo.editJob(job.id, {
+      notes: 'touched',
+      job_date: '2026-06-01',
+      receipts: [{ ...receipt(f, 8), received_on: existing.rows[0]!.received_on }],
+    } as never);
 
     const r = await query<{ received_on: string }>(
       `SELECT received_on FROM job_receipts WHERE job_id = $1`, [job.id]);
-    // Editing anything on the job must not backdate the maal-aaya event.
     expect(r.rows[0]!.received_on).toBe('2026-07-15');
+    const mv = await query<{ moved_on: string }>(
+      `SELECT moved_on FROM finished_stock_movements WHERE ref_id = $1`, [job.id]);
+    expect(mv.rows[0]!.moved_on).toBe('2026-07-15');
+  });
+
+  it('drops a receipt date rewrite when the caller omits it', async () => {
+    await stockUp(f);
+    const job = await jobsRepo.create({ karigar_id: f.karigarId, job_date: '2026-06-01', issues: [issue(f)] } as never);
+    await jobsRepo.addReceipt(job.id, [receipt(f, 8)], [], '2026-07-15');
+    // No received_on supplied: the row is genuinely new, so today is the honest
+    // answer — but it must not silently claim the job's date either.
+    await jobsRepo.editJob(job.id, { receipts: [receipt(f, 4)] } as never);
+    const r = await query<{ received_on: string }>(
+      `SELECT received_on FROM job_receipts WHERE job_id = $1`, [job.id]);
+    expect(r.rows[0]!.received_on).not.toBe('2026-06-01');
   });
 
   it('leaves no stock behind when issues are cleared', async () => {

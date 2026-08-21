@@ -1,17 +1,24 @@
 import { query, withTransaction } from '../../config/db.js';
 
 export interface JobIssueInput {
+  /** The day this line actually left stock. Preserved across an edit so restating
+   *  a line does not backdate (or forward-date) the movement. */
+  issued_on?: string | null;
   item_id: number;
   variant_id?: number | null;
   unit: string;
   qty: number;
 }
 export interface JobReceiptInput {
+  /** The day these goods actually came back. See JobIssueInput.issued_on. */
+  received_on?: string | null;
   product_id: number;
   variant_id?: number | null;
   qty: number;
 }
 export interface JobReturnInput {
+  /** The day this material actually came back. See JobIssueInput.issued_on. */
+  returned_on?: string | null;
   item_id: number;
   variant_id?: number | null;
   unit: string;
@@ -103,21 +110,15 @@ export const jobsRepo = {
         await client.query(
           `INSERT INTO job_receipts (job_id, product_id, variant_id, qty, received_on)
            VALUES ($1,$2,$3,$4, COALESCE($5, CURRENT_DATE))`,
-          [jobId, r.product_id, r.variant_id ?? null, r.qty, onDate ?? null],
+          [jobId, r.product_id, r.variant_id ?? null, r.qty, r.received_on ?? onDate ?? null],
         );
         await client.query(
           `INSERT INTO finished_stock_movements (product_id, variant_id, qty, reason, ref_id, moved_on)
            VALUES ($1,$2,$3,'job_receipt',$4, COALESCE($5, CURRENT_DATE))`,
-          [r.product_id, r.variant_id ?? null, r.qty, jobId, onDate ?? null],
+          [r.product_id, r.variant_id ?? null, r.qty, jobId, r.received_on ?? onDate ?? null],
         );
       }
-      for (const ret of returns) {
-        await client.query(
-          `INSERT INTO stock_movements (item_id, variant_id, unit, qty, reason, ref_id, vendor_id, moved_on)
-           VALUES ($1,$2,$3,$4,'job_return',$5,NULL, COALESCE($6, CURRENT_DATE))`,
-          [ret.item_id, ret.variant_id ?? null, ret.unit, ret.qty, jobId, onDate ?? null],
-        );
-      }
+      await insertReturns(client, jobId, returns, onDate ?? null);
       if (payment && payment.amount > 0) {
         const owner = await client.query<{ karigar_id: number }>('SELECT karigar_id FROM jobs WHERE id = $1', [jobId]);
         const karigarId = owner.rows[0]?.karigar_id;
@@ -168,6 +169,7 @@ export const jobsRepo = {
       notes?: string | null;
       issues?: JobIssueInput[];
       receipts?: JobReceiptInput[];
+      returns?: JobReturnInput[];
     },
   ): Promise<boolean> {
     return withTransaction(async (client) => {
@@ -190,13 +192,24 @@ export const jobsRepo = {
         ],
       );
 
+      // A job's raw material moves in two directions — issued out, and unused
+      // stock returned — and both are stock_movements on this job. Replacing the
+      // issues while a job_return survives credits material that was never
+      // issued, so the pair is replaced as a unit (same reasons deleteJob clears).
       if (fields.issues !== undefined) {
         await client.query(
-          `DELETE FROM stock_movements WHERE ref_id = $1 AND reason = 'job_issue'`,
+          `DELETE FROM stock_movements WHERE ref_id = $1 AND reason IN ('job_issue','job_return')`,
           [jobId],
         );
         await client.query(`DELETE FROM job_issues WHERE job_id = $1`, [jobId]);
         await insertIssues(client, jobId, fields.issues, fields.job_date ?? null);
+        await insertReturns(client, jobId, fields.returns ?? [], fields.job_date ?? null);
+      } else if (fields.returns !== undefined) {
+        await client.query(
+          `DELETE FROM stock_movements WHERE ref_id = $1 AND reason = 'job_return'`,
+          [jobId],
+        );
+        await insertReturns(client, jobId, fields.returns, fields.job_date ?? null);
       }
 
       if (fields.receipts !== undefined) {
@@ -209,12 +222,14 @@ export const jobsRepo = {
           await client.query(
             `INSERT INTO job_receipts (job_id, product_id, variant_id, qty, received_on)
              VALUES ($1,$2,$3,$4, COALESCE($5, CURRENT_DATE))`,
-            [jobId, r.product_id, r.variant_id ?? null, r.qty, fields.job_date ?? null],
+            // The line's own date, NOT job_date: an edit must not move the day the
+            // goods came back (and with job_date absent this fell through to today).
+            [jobId, r.product_id, r.variant_id ?? null, r.qty, r.received_on ?? null],
           );
           await client.query(
             `INSERT INTO finished_stock_movements (product_id, variant_id, qty, reason, ref_id, moved_on)
              VALUES ($1,$2,$3,'job_receipt',$4, COALESCE($5, CURRENT_DATE))`,
-            [r.product_id, r.variant_id ?? null, r.qty, jobId, fields.job_date ?? null],
+            [r.product_id, r.variant_id ?? null, r.qty, jobId, r.received_on ?? null],
           );
         }
       }
@@ -331,6 +346,22 @@ export const jobsRepo = {
   },
 };
 
+/** Unused raw material coming back from a job — a positive movement, tagged job_return. */
+async function insertReturns(
+  client: import('pg').PoolClient,
+  jobId: number,
+  returns: JobReturnInput[],
+  onDate: string | null,
+) {
+  for (const ret of returns) {
+    await client.query(
+      `INSERT INTO stock_movements (item_id, variant_id, unit, qty, reason, ref_id, vendor_id, moved_on)
+       VALUES ($1,$2,$3,$4,'job_return',$5,NULL, COALESCE($6, CURRENT_DATE))`,
+      [ret.item_id, ret.variant_id ?? null, ret.unit, Math.abs(ret.qty), jobId, ret.returned_on ?? onDate],
+    );
+  }
+}
+
 async function insertIssues(
   client: import('pg').PoolClient,
   jobId: number,
@@ -341,13 +372,13 @@ async function insertIssues(
     await client.query(
       `INSERT INTO job_issues (job_id, item_id, variant_id, unit, qty, issued_on)
        VALUES ($1,$2,$3,$4,$5, COALESCE($6, CURRENT_DATE))`,
-      [jobId, it.item_id, it.variant_id ?? null, it.unit, it.qty, onDate],
+      [jobId, it.item_id, it.variant_id ?? null, it.unit, it.qty, it.issued_on ?? onDate],
     );
     // Raw material leaves stock (negative movement).
     await client.query(
       `INSERT INTO stock_movements (item_id, variant_id, unit, qty, reason, ref_id, vendor_id, moved_on)
        VALUES ($1,$2,$3,$4,'job_issue',$5,NULL, COALESCE($6, CURRENT_DATE))`,
-      [it.item_id, it.variant_id ?? null, it.unit, -Math.abs(it.qty), jobId, onDate],
+      [it.item_id, it.variant_id ?? null, it.unit, -Math.abs(it.qty), jobId, it.issued_on ?? onDate],
     );
   }
 }

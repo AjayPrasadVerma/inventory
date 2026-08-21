@@ -50,6 +50,26 @@ assertSafeTestDatabase();
 const { pool, query } = await import('../../src/config/db.js');
 export { pool, query };
 
+/**
+ * Retry a step that only fails because the link blipped. CI runs Postgres on the
+ * same machine and never needs this; a remote test database on a flaky link does,
+ * and a dropped socket is not a test failure.
+ */
+async function withRetry<T>(label: string, fn: () => Promise<T>, attempts = 3): Promise<T> {
+  let last: unknown;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      last = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/terminated|timeout|ECONNRESET|ECONNREFUSED|deadlock/i.test(msg)) throw err;
+      if (i < attempts) await new Promise((r) => setTimeout(r, 500 * i));
+    }
+  }
+  throw new Error(`${label} failed after ${attempts} attempts: ${last instanceof Error ? last.message : last}`);
+}
+
 /** Apply every migration from scratch. Safe to call repeatedly. */
 export async function migrate(): Promise<void> {
   const { readdir, readFile } = await import('node:fs/promises');
@@ -65,15 +85,53 @@ export async function migrate(): Promise<void> {
   }
 }
 
-/** Tables emptied between tests, children before parents. */
-const TABLES = [
+/** Everything a test writes: documents and the stock/money they move. Cleared
+ *  between tests. Children before parents so no CASCADE is needed. */
+const TXN_TABLES = [
   'payments', 'sale_items', 'sales', 'job_receipts', 'job_issues', 'jobs',
   'purchase_items', 'purchases', 'finished_stock_movements', 'stock_movements',
+];
+
+/** The catalogue. Seeded once per file, not per test — truncating it needs heavy
+ *  locks on tables everything references, which is both slow and deadlock-prone. */
+const CATALOGUE_TABLES = [
   'product_variants', 'products', 'item_variants', 'item_units', 'items',
   'customers', 'karigars', 'vendors',
 ];
 
-/** Wipe all business data. Users and _migrations survive. */
+/**
+ * TRUNCATE takes ACCESS EXCLUSIVE, so a connection left over from the previous
+ * test file can turn this into a deadlock. One dedicated connection, a short
+ * lock_timeout so it fails fast instead of hanging, and one retry.
+ */
+async function truncate(tables: string[]): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    const client = await pool.connect();
+    try {
+      await client.query('SET LOCAL lock_timeout = \'5s\'');
+      await client.query(`TRUNCATE ${tables.join(', ')} RESTART IDENTITY`);
+      return;
+    } catch (err) {
+      if (attempt >= 3) throw err;
+      await new Promise((r) => setTimeout(r, 250 * attempt));
+    } finally {
+      client.release();
+    }
+  }
+}
+
+/** Clear what a test wrote, keeping the catalogue. Call in beforeEach. */
+export async function resetTransactions(): Promise<void> {
+  await withRetry('resetTransactions', () => truncate(TXN_TABLES));
+}
+
+/** Wipe all business data including the catalogue. Call once, in beforeAll. */
 export async function reset(): Promise<void> {
-  await query(`TRUNCATE ${TABLES.join(', ')} RESTART IDENTITY CASCADE`);
+  await withRetry('reset', () => truncate([...TXN_TABLES, ...CATALOGUE_TABLES]));
+}
+
+/** migrate + reset + seed, retried past a blipping link. Use in beforeAll. */
+export async function setupSchema(): Promise<void> {
+  await withRetry('migrate', migrate);
+  await reset();
 }

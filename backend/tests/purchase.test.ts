@@ -4,14 +4,20 @@
  * from reads, and deletes that left stock or payments behind.
  */
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from 'vitest';
-import { migrate, reset, pool, query } from './helpers/db.js';
+import { setupSchema, resetTransactions, pool, query } from './helpers/db.js';
 import { seedFixtures, rawOnHand, finishedOnHand, type Fixtures } from './helpers/fixtures.js';
 import { purchasesRepo } from '../src/modules/purchases/purchases.repo.js';
 import { vendorsRepo } from '../src/modules/vendors/vendors.repo.js';
 
 let f: Fixtures;
-beforeAll(migrate);
-beforeEach(async () => { await reset(); f = await seedFixtures(); });
+
+// The catalogue is seeded once: truncating tables everything references needs
+// heavy locks, and every test only ever writes documents and movements.
+beforeAll(async () => {
+  await setupSchema();
+  f = await seedFixtures();
+});
+beforeEach(resetTransactions);
 afterAll(() => pool.end());
 
 const rawLine = (f: Fixtures, qty = 10, rate = 50) =>
