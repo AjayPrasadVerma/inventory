@@ -134,16 +134,6 @@ export function DateField({
   const [viewYear, setViewYear] = React.useState(initialView.getFullYear());
   const [viewMonth, setViewMonth] = React.useState(initialView.getMonth());
 
-  // Keep the visible month in sync if the value changes externally while closed.
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- resync the visible month to `value` only while the popover is closed
-  React.useEffect(() => {
-    if (!open) {
-      const base = parseISO(value) ?? todayLocal();
-      setViewYear(base.getFullYear());
-      setViewMonth(base.getMonth());
-    }
-  }, [value, open]);
-
   React.useEffect(() => {
     if (!open) return;
     function handleMouseDown(e: MouseEvent) {
@@ -217,7 +207,15 @@ export function DateField({
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => {
-          if (!disabled) setOpen((o) => !o);
+          if (disabled) return;
+          // Anchor the grid on the current value as it opens. Doing it here rather
+          // than in an effect keeps the sync out of the render path entirely.
+          if (!open) {
+            const base = parseISO(value) ?? todayLocal();
+            setViewYear(base.getFullYear());
+            setViewMonth(base.getMonth());
+          }
+          setOpen((o) => !o);
         }}
         className={cn(
           inputBase,
