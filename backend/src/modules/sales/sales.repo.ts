@@ -11,6 +11,7 @@
  */
 
 import { query, withTransaction } from '../../config/db.js';
+import { likeTerm } from '../../utils/sql.js';
 
 export interface SaleItemInput {
   product_id: number;
@@ -120,9 +121,9 @@ export const salesRepo = {
     const where: string[] = ['1 = 1'];
     const params: unknown[] = [];
     if (opts.search) {
-      params.push(`%${opts.search}%`);
+      params.push(likeTerm(opts.search));
       const p = `$${params.length}`;
-      where.push(`(c.name ILIKE ${p} OR c.mobile ILIKE ${p})`);
+      where.push(`(c.name ILIKE ${p} ESCAPE '\\' OR c.mobile ILIKE ${p} ESCAPE '\\')`);
     }
     if (opts.type) {
       params.push(opts.type);

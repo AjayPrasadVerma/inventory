@@ -1,4 +1,5 @@
 import { query } from '../../config/db.js';
+import { likeTerm } from '../../utils/sql.js';
 
 export interface VendorRow {
   id: number;
@@ -50,9 +51,9 @@ export const vendorsRepo = {
     const params: unknown[] = [];
 
     if (opts.search) {
-      params.push(`%${opts.search}%`);
+      params.push(likeTerm(opts.search));
       const p = `$${params.length}`;
-      where.push(`(name ILIKE ${p} OR phone ILIKE ${p} OR city ILIKE ${p})`);
+      where.push(`(name ILIKE ${p} ESCAPE '\\' OR phone ILIKE ${p} ESCAPE '\\' OR city ILIKE ${p} ESCAPE '\\')`);
     }
 
     const sortCol = SORTABLE[opts.sort ?? 'name'] ?? 'name';
