@@ -68,6 +68,17 @@ const RULES = [
     },
   },
   {
+    id: 'out-of-scope-module-edited',
+    level: 'warn',
+    why: 'Sale and Customers are out of scope (CLAUDE.md §7) and the app is inventory-only. '
+       + 'These files are kept only so billing can be switched back on later. Seeing this means '
+       + 'the banner was removed or a new file was added to the module — check that was intended.',
+    files: /(modules\/(sales|customers)\/|app\/\(app\)\/(sales|customers)\/|reports\/sales\/|customer-receive-modal)/,
+    // Fires once per file, on line 1, when the banner is missing.
+    test: (line, _p, all) => line.length > 0 && all.indexOf(line) === 0
+      && !all.includes('UNUSED — SALE / CUSTOMER MODULE'),
+  },
+  {
     id: 'like-without-escape',
     level: 'warn',
     why: 'A user-supplied LIKE/ILIKE pattern with an unescaped % or _ is a wildcard: searching "%" '
