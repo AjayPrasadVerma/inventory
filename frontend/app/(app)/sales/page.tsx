@@ -1,5 +1,16 @@
 "use client";
 
+/**
+ * ⚠️  UNUSED — SALE / CUSTOMER MODULE, NOT PART OF THE CURRENT SCOPE
+ *
+ * The app is inventory-only right now. Sale and Customers are hidden from the
+ * menu (see components/app-shell.tsx) and the owner has said no work is to be
+ * done here. This file is kept, not deleted, so billing can be switched back on
+ * later without rebuilding it — the routes, tables and data are all intact.
+ *
+ * Do not extend, refactor or "tidy" this file. If a change here looks necessary,
+ * ask first: it almost certainly means something outside the module is wrong.
+ */
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";

@@ -3,10 +3,18 @@ import { z } from 'zod';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { AppError, asyncHandler } from '../../utils/http.js';
 import { parseId, pastOrTodayDateSchema } from '../../utils/validation.js';
+import { assertCatalogueLines } from '../../utils/catalogue.js';
 import { jobsRepo } from './jobs.repo.js';
 
 export const jobsRouter = Router();
 jobsRouter.use(requireAuth);
+
+/** Raw-material line → its colour and unit must both belong to that item. */
+const issueLine = (l: { item_id: number; variant_id?: number | null; unit: string }) =>
+  ({ kind: 'item' as const, id: l.item_id, variant_id: l.variant_id ?? null, unit: l.unit });
+/** Finished-goods line → only the variant is checked; products have no unit catalogue. */
+const receiptLine = (l: { product_id: number; variant_id?: number | null }) =>
+  ({ kind: 'product' as const, id: l.product_id, variant_id: l.variant_id ?? null });
 
 const issueSchema = z.object({
   item_id: z.coerce.number().int().positive(),
@@ -74,6 +82,7 @@ jobsRouter.post(
   '/',
   asyncHandler(async (req, res) => {
     const input = createSchema.parse(req.body);
+    await assertCatalogueLines(input.issues.map(issueLine));
     const created = await jobsRepo.create({ ...input, created_by: req.user?.id ?? null });
     res.status(201).json({ data: created });
   }),
@@ -88,6 +97,7 @@ jobsRouter.post(
       issues: z.array(issueSchema).min(1).max(200, 'Too many items'),
       on_date: pastOrTodayDateSchema.optional().nullable(),
     }).parse(req.body);
+    await assertCatalogueLines(body.issues.map(issueLine));
     await jobsRepo.addIssues(id, body.issues, body.on_date);
     res.json({ ok: true });
   }),
@@ -125,6 +135,11 @@ jobsRouter.patch(
       receipts: z.array(receiptSchema).max(200, 'Too many items').optional(),
       returns: z.array(issueSchema).max(200, 'Too many items').optional(),
     }).parse(req.body);
+    await assertCatalogueLines([
+      ...(body.issues ?? []).map(issueLine),
+      ...(body.returns ?? []).map(issueLine),
+      ...(body.receipts ?? []).map(receiptLine),
+    ]);
     const ok = await jobsRepo.editJob(id, body);
     if (!ok) throw new AppError(404, 'Job not found');
     res.json({ ok: true });

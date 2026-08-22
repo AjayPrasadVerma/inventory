@@ -139,3 +139,39 @@ describe('khata invariants', () => {
     expect(bill.remaining).toBe(600);
   });
 });
+
+describe('line amount', () => {
+  it('is always qty × rate, never what the caller claimed', async () => {
+    // `amount` is no longer accepted from the request; a caller that sends one
+    // must not be able to make a bill total disagree with its own lines.
+    const pur = await purchasesRepo.create({
+      vendor_id: f.vendorId,
+      items: [{ ...rawLine(f, 10, 50), amount: 999_999 } as never],
+    } as never);
+
+    const line = await query<{ amount: string }>(
+      'SELECT amount FROM purchase_items WHERE purchase_id = $1', [pur.id]);
+    const head = await query<{ total_amount: string }>(
+      'SELECT total_amount FROM purchases WHERE id = $1', [pur.id]);
+
+    expect(Number(line.rows[0]!.amount)).toBe(500);
+    expect(Number(head.rows[0]!.total_amount)).toBe(500);
+  });
+
+  it('keeps the bill total equal to the sum of its lines after an edit', async () => {
+    const pur = await purchasesRepo.create({
+      vendor_id: f.vendorId, items: [rawLine(f, 10, 50)],
+    } as never);
+    await purchasesRepo.editRow(pur.id, {
+      items: [rawLine(f, 3, 20), productLine(f, 2, 100)],
+    } as never);
+
+    const sum = await query<{ s: string }>(
+      'SELECT SUM(amount)::text AS s FROM purchase_items WHERE purchase_id = $1', [pur.id]);
+    const head = await query<{ total_amount: string }>(
+      'SELECT total_amount FROM purchases WHERE id = $1', [pur.id]);
+
+    expect(Number(sum.rows[0]!.s)).toBe(260);
+    expect(Number(head.rows[0]!.total_amount)).toBe(260);
+  });
+});

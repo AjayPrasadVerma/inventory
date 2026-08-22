@@ -14,7 +14,6 @@ export interface PurchaseItemInput {
   unit: string;
   qty: number;
   rate: number;
-  amount?: number;
 }
 
 /** Which table a line belongs to — defaults to raw material for older callers. */
@@ -67,7 +66,9 @@ async function insertLine(
   movedOn: string | null,
   it: PurchaseItemInput,
 ): Promise<void> {
-  const amount = it.amount ?? Number((it.qty * it.rate).toFixed(2));
+  // Always derived — never taken from the request, so a line's total cannot
+  // disagree with its own qty and rate.
+  const amount = Number((it.qty * it.rate).toFixed(2));
 
   if (lineKind(it) === 'product') {
     await client.query(
@@ -100,7 +101,7 @@ export const purchasesRepo = {
   async create(input: PurchaseInput): Promise<{ id: number }> {
     const items = input.items.map((it) => ({
       ...it,
-      amount: it.amount ?? Number((it.qty * it.rate).toFixed(2)),
+      amount: Number((it.qty * it.rate).toFixed(2)),
     }));
     const total = items.reduce((s, it) => s + it.amount, 0);
 
@@ -271,14 +272,20 @@ export const purchasesRepo = {
       );
       if (!ex.rows[0]) return false;
 
-      await client.query(
-        `UPDATE purchases SET
-           vendor_id     = COALESCE($2, vendor_id),
-           bill_no       = COALESCE($3, bill_no),
-           purchase_date = COALESCE($4, purchase_date)
-         WHERE id = $1`,
-        [id, input.vendor_id ?? null, input.bill_no ?? null, input.purchase_date ?? null],
-      );
+      // Only the fields actually sent are assigned — see editJob for why COALESCE
+      // is wrong here: it made bill_no impossible to clear.
+      const sets: string[] = [];
+      const vals: unknown[] = [id];
+      const put = (col: string, value: unknown) => {
+        vals.push(value);
+        sets.push(`${col} = $${vals.length}`);
+      };
+      if (input.vendor_id != null) put('vendor_id', input.vendor_id);
+      if (input.purchase_date != null) put('purchase_date', input.purchase_date);
+      if (input.bill_no !== undefined) put('bill_no', input.bill_no);
+      if (sets.length > 0) {
+        await client.query(`UPDATE purchases SET ${sets.join(', ')} WHERE id = $1`, vals);
+      }
 
       if (input.items !== undefined) {
         // The vendor tag / movement date reflect the (possibly updated) purchase head.
@@ -298,7 +305,7 @@ export const purchasesRepo = {
 
         let total = 0;
         for (const it of input.items) {
-          total += it.amount ?? Number((it.qty * it.rate).toFixed(2));
+          total += Number((it.qty * it.rate).toFixed(2));
           await insertLine(client, id, vendorId, movedOn, it);
         }
 

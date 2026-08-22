@@ -16,7 +16,15 @@ export const dateStringSchema = z
   .string()
   .trim()
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a valid date (YYYY-MM-DD)')
-  .refine((s) => !Number.isNaN(Date.parse(s)), 'Invalid date');
+  .refine((s) => {
+    // Date.parse is not enough: it ROLLS OVER an impossible day, so "2026-02-30"
+    // silently becomes 2 March and passes the check — then Postgres rejects the
+    // literal and the request 500s. Re-derive the parts and require a round trip.
+    // (UTC so no timezone can shift the day; only the parts are compared.)
+    const [y, m, d] = s.split('-').map(Number);
+    const dt = new Date(Date.UTC(y as number, (m as number) - 1, d as number));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() === (m as number) - 1 && dt.getUTCDate() === d;
+  }, 'That date does not exist');
 
 /** A transactional date that may not be in the future (sales, purchases, issues, payments). */
 export const pastOrTodayDateSchema = dateStringSchema.refine((s) => {

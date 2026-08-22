@@ -72,7 +72,22 @@ Read the module you're touching before adding to it, and match its patterns.
 
 Tailwind class names must be **literal strings** — a class assembled from a template literal is never emitted.
 
-## 7. UI conventions the owner has settled
+## 7. Sale and Customers are OUT OF SCOPE
+
+The app is inventory-only. These are hidden from the menu and **no work is to be done on them**:
+
+```
+backend/src/modules/sales/**          frontend/app/(app)/sales/**
+backend/src/modules/customers/**      frontend/app/(app)/customers/**
+                                      frontend/app/(app)/reports/sales/**
+                                      frontend/components/customer-receive-modal.tsx
+```
+
+Every one of those files carries an `UNUSED — SALE / CUSTOMER MODULE` banner. They are kept rather than deleted so billing can be switched back on later without rebuilding it — routes, tables and data are all intact.
+
+Don't extend, refactor or "tidy" them, and don't count them when asked to clean up dead code. If a change there looks necessary, ask first — it usually means something outside the module is wrong. To bring the module back, re-add its two `NAV` entries in `components/app-shell.tsx` and drop the banners.
+
+## 8. UI conventions the owner has settled
 
 - Money lives on the **vendor** side only. A karigar has "total paid", no dues.
 - Transactions live inside their master's hub: purchases in `/vendors/account`, jobs in `/karigars/account`. Don't add a top-level page for them.
