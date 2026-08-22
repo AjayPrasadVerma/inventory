@@ -19,7 +19,7 @@ const NAV: NavItem[] = [
   { href: "/", label: "Dashboard", icon: Icon.Dashboard },
   { href: "/vendors", label: "Vendors", icon: Icon.Vendor },
   { href: "/karigars", label: "Karigars", icon: Icon.Karigar },
-  { href: "/items", label: "Raw Materials", icon: Icon.Item },
+  // Raw material and finished goods share one list — see app/(app)/products/page.tsx.
   { href: "/products", label: "Products", icon: Icon.Product },
 ];
 

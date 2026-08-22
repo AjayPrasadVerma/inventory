@@ -3,6 +3,7 @@ import express from 'express';
 import { env } from './config/env.js';
 import { errorHandler, notFound } from './middleware/error.js';
 import { authRouter } from './modules/auth/auth.routes.js';
+import { catalogueRouter } from './modules/catalogue/catalogue.routes.js';
 import { customersRouter } from './modules/customers/customers.routes.js';
 import { itemsRouter } from './modules/items/items.routes.js';
 import { jobsRouter } from './modules/jobs/jobs.routes.js';
@@ -34,6 +35,7 @@ export function createApp() {
   app.use('/api/auth', authRouter);
   app.use('/api/vendors', vendorsRouter);
   app.use('/api/karigars', karigarsRouter);
+  app.use('/api/catalogue', catalogueRouter);
   app.use('/api/items', itemsRouter);
   app.use('/api/products', productsRouter);
   app.use('/api/purchases', purchasesRouter);
