@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { query } from '../../config/db.js';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { AppError, asyncHandler } from '../../utils/http.js';
 import { parseId, pastOrTodayDateSchema } from '../../utils/validation.js';
@@ -105,11 +106,35 @@ const editSchema = z.object({
 
 purchasesRouter.patch(
   '/:id',
+  // Editing a bill rewrites stock movements and money, exactly like deleting it,
+  // so it carries the same permission as DELETE rather than being open to staff.
+  requireRole('owner'),
   asyncHandler(async (req, res) => {
+    const id = parseId(req.params.id);
     const body = editSchema.parse(req.body);
-    const ok = await purchasesRepo.editRow(parseId(req.params.id), body);
+
+    // Moving a bill to a different vendor would strand any payment made against
+    // it: the payment stays with the vendor who paid, while the bill leaves their
+    // khata, so the money is attached to a bill that is no longer theirs.
+    if (body.vendor_id != null) {
+      const cur = await query<{ vendor_id: number }>('SELECT vendor_id FROM purchases WHERE id = $1', [id]);
+      const currentVendor = cur.rows[0]?.vendor_id;
+      if (currentVendor != null && currentVendor !== body.vendor_id) {
+        const paid = await query<{ count: string }>(
+          `SELECT COUNT(*)::int AS count FROM payments WHERE purchase_id = $1`, [id]);
+        if (Number(paid.rows[0]?.count ?? 0) > 0) {
+          throw new AppError(
+            409,
+            'This bill has payments recorded against it, so it cannot be moved to another vendor. '
+            + 'Delete the payments first, or delete this bill and enter it under the right vendor.',
+          );
+        }
+      }
+    }
+
+    const ok = await purchasesRepo.editRow(id, body);
     if (!ok) throw new AppError(404, 'Purchase not found');
-    res.json({ data: await purchasesRepo.findById(parseId(req.params.id)) });
+    res.json({ data: await purchasesRepo.findById(id) });
   }),
 );
 

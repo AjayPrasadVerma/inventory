@@ -243,7 +243,11 @@ export default function VendorAccountPage() {
                         <td className={cell}>
                           <span className="whitespace-nowrap font-mono text-[15px] font-semibold text-ink">{b.bill_no || `#${b.id}`}</span>
                           <span className="mt-1 flex gap-3 text-[13px]">
-                            <button onClick={() => setPurchaseModal({ id: b.id })} className="cursor-pointer text-muted underline-offset-2 hover:text-ink hover:underline">Edit</button>
+                            {/* Editing a bill rewrites stock and money, so the API gates it to
+                                the owner like DELETE. Hide it rather than let staff hit a 403. */}
+                            {isOwner && (
+                              <button onClick={() => setPurchaseModal({ id: b.id })} className="cursor-pointer text-muted underline-offset-2 hover:text-ink hover:underline">Edit</button>
+                            )}
                             {isOwner && (
                               <button onClick={() => setPendingDelete({ kind: "purchase", id: b.id, label: billLabel(b) })} className="cursor-pointer text-muted underline-offset-2 hover:text-[color:var(--danger)] hover:underline">Delete</button>
                             )}

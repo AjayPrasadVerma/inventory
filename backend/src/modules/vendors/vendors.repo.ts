@@ -182,10 +182,16 @@ export const vendorsRepo = {
       itemsBy.set(r.purchase_id, list);
     }
 
+    // Which bills actually belong to this vendor. A payment pointing at a bill
+    // outside this set would otherwise be read by nobody — not by a bill, not as
+    // unlinked — so it would vanish from the khata AND from the paid total, leaving
+    // Outstanding overstated and no longer matching the vendors list.
+    const ownBills = new Set(purchases.map((p) => p.id));
+
     const paysBy = new Map<number, typeof payments>();
     const unlinked: { id: number; date: string; method: string | null; amount: number; note: string | null }[] = [];
     for (const pay of payments) {
-      if (pay.purchase_id == null) {
+      if (pay.purchase_id == null || !ownBills.has(pay.purchase_id)) {
         unlinked.push({ id: pay.id, date: pay.pay_date, method: pay.method, amount: Number(pay.amount), note: pay.ref_note });
         continue;
       }
