@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { AppError, asyncHandler } from '../../utils/http.js';
 import { parseId, pastOrTodayDateSchema } from '../../utils/validation.js';
+import { assertCatalogueLines } from '../../utils/catalogue.js';
 import { purchasesRepo } from './purchases.repo.js';
 
 export const purchasesRouter = Router();
@@ -21,12 +22,24 @@ const purchaseItemSchema = z.object({
   unit: z.string().trim().min(1).max(30),
   qty: z.coerce.number().positive('Quantity must be greater than 0').max(1_000_000),
   rate: z.coerce.number().nonnegative().max(1_000_000_000).default(0),
-  amount: z.coerce.number().nonnegative().max(1_000_000_000).optional(),
+  // No `amount` — it is qty × rate, derived server-side. Accepting it from the
+  // client let a caller state a total that did not match its own line.
 }).refine(
   (l) => (l.kind === 'product' ? l.product_id != null && l.item_id == null
                                : l.item_id != null && l.product_id == null),
   { message: 'Each line needs exactly one of item_id / product_id, matching its kind.' },
 );
+
+/** A purchase line reduced to what the catalogue check needs. */
+const toCatalogueLine = (l: {
+  kind: 'item' | 'product'; item_id?: number | null; product_id?: number | null;
+  variant_id?: number | null; unit: string;
+}) => ({
+  kind: l.kind,
+  id: (l.kind === 'product' ? l.product_id : l.item_id) as number,
+  variant_id: l.variant_id ?? null,
+  unit: l.unit,
+});
 
 const purchaseSchema = z.object({
   vendor_id: z.coerce.number().int().positive('Select a vendor'),
@@ -75,6 +88,7 @@ purchasesRouter.post(
   '/',
   asyncHandler(async (req, res) => {
     const input = purchaseSchema.parse(req.body);
+    await assertCatalogueLines(input.items.map(toCatalogueLine));
     const created = await purchasesRepo.create({ ...input, created_by: req.user?.id ?? null });
     res.status(201).json({ data: await purchasesRepo.findById(created.id) });
   }),

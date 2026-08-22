@@ -14,7 +14,6 @@ export interface PurchaseItemInput {
   unit: string;
   qty: number;
   rate: number;
-  amount?: number;
 }
 
 /** Which table a line belongs to — defaults to raw material for older callers. */
@@ -67,7 +66,9 @@ async function insertLine(
   movedOn: string | null,
   it: PurchaseItemInput,
 ): Promise<void> {
-  const amount = it.amount ?? Number((it.qty * it.rate).toFixed(2));
+  // Always derived — never taken from the request, so a line's total cannot
+  // disagree with its own qty and rate.
+  const amount = Number((it.qty * it.rate).toFixed(2));
 
   if (lineKind(it) === 'product') {
     await client.query(
@@ -100,7 +101,7 @@ export const purchasesRepo = {
   async create(input: PurchaseInput): Promise<{ id: number }> {
     const items = input.items.map((it) => ({
       ...it,
-      amount: it.amount ?? Number((it.qty * it.rate).toFixed(2)),
+      amount: Number((it.qty * it.rate).toFixed(2)),
     }));
     const total = items.reduce((s, it) => s + it.amount, 0);
 
@@ -304,7 +305,7 @@ export const purchasesRepo = {
 
         let total = 0;
         for (const it of input.items) {
-          total += it.amount ?? Number((it.qty * it.rate).toFixed(2));
+          total += Number((it.qty * it.rate).toFixed(2));
           await insertLine(client, id, vendorId, movedOn, it);
         }
 
