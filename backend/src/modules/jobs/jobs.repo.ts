@@ -1,4 +1,5 @@
 import { query, withTransaction } from '../../config/db.js';
+import { likeTerm } from '../../utils/sql.js';
 
 export interface JobIssueInput {
   /** The day this line actually left stock. Preserved across an edit so restating
@@ -274,9 +275,9 @@ export const jobsRepo = {
     const where: string[] = ['1 = 1'];
     const params: unknown[] = [];
     if (opts.search) {
-      params.push(`%${opts.search}%`);
+      params.push(likeTerm(opts.search));
       const p = `$${params.length}`;
-      where.push(`(k.name ILIKE ${p} OR j.expected_note ILIKE ${p})`);
+      where.push(`(k.name ILIKE ${p} ESCAPE '\\' OR j.expected_note ILIKE ${p} ESCAPE '\\')`);
     }
     if (opts.karigarId) {
       params.push(opts.karigarId);

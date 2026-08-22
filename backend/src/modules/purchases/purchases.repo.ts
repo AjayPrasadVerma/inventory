@@ -1,4 +1,5 @@
 import { query, withTransaction } from '../../config/db.js';
+import { likeTerm } from '../../utils/sql.js';
 
 /**
  * One purchase line. `kind` decides which side of stock it lands on:
@@ -141,9 +142,9 @@ export const purchasesRepo = {
     const params: unknown[] = [];
 
     if (opts.search) {
-      params.push(`%${opts.search}%`);
+      params.push(likeTerm(opts.search));
       const p = `$${params.length}`;
-      where.push(`(p.bill_no ILIKE ${p} OR v.name ILIKE ${p})`);
+      where.push(`(p.bill_no ILIKE ${p} ESCAPE '\\' OR v.name ILIKE ${p} ESCAPE '\\')`);
     }
     if (opts.vendorId) {
       params.push(opts.vendorId);

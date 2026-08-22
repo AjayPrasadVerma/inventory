@@ -1,4 +1,5 @@
 import { query, withTransaction } from '../../config/db.js';
+import { likeTerm } from '../../utils/sql.js';
 
 export interface ItemRow {
   id: number;
@@ -78,8 +79,8 @@ export const itemsRepo = {
     const params: unknown[] = [];
 
     if (opts.search) {
-      params.push(`%${opts.search}%`);
-      where.push(`i.name ILIKE $${params.length}`);
+      params.push(likeTerm(opts.search));
+      where.push(`i.name ILIKE $${params.length} ESCAPE '\\'`);
     }
     if (opts.category) {
       params.push(opts.category);

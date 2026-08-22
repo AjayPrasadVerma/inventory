@@ -1,4 +1,5 @@
 import { query } from '../../config/db.js';
+import { likeTerm } from '../../utils/sql.js';
 
 export interface KarigarRow {
   id: number;
@@ -33,9 +34,9 @@ export const karigarsRepo = {
     const params: unknown[] = [];
 
     if (opts.search) {
-      params.push(`%${opts.search}%`);
+      params.push(likeTerm(opts.search));
       const p = `$${params.length}`;
-      where.push(`(name ILIKE ${p} OR phone ILIKE ${p})`);
+      where.push(`(name ILIKE ${p} ESCAPE '\\' OR phone ILIKE ${p} ESCAPE '\\')`);
     }
     if (opts.productType) {
       params.push(opts.productType);

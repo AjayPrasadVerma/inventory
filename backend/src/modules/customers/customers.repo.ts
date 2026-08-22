@@ -11,6 +11,7 @@
  */
 
 import { query } from '../../config/db.js';
+import { likeTerm } from '../../utils/sql.js';
 
 export interface CustomerRow {
   id: number;
@@ -43,9 +44,9 @@ export const customersRepo = {
     const where: string[] = ['1 = 1'];
     const params: unknown[] = [];
     if (opts.search) {
-      params.push(`%${opts.search}%`);
+      params.push(likeTerm(opts.search));
       const p = `$${params.length}`;
-      where.push(`(name ILIKE ${p} OR mobile ILIKE ${p})`);
+      where.push(`(name ILIKE ${p} ESCAPE '\\' OR mobile ILIKE ${p} ESCAPE '\\')`);
     }
     const whereSql = `WHERE ${where.join(' AND ')}`;
 
