@@ -271,14 +271,20 @@ export const purchasesRepo = {
       );
       if (!ex.rows[0]) return false;
 
-      await client.query(
-        `UPDATE purchases SET
-           vendor_id     = COALESCE($2, vendor_id),
-           bill_no       = COALESCE($3, bill_no),
-           purchase_date = COALESCE($4, purchase_date)
-         WHERE id = $1`,
-        [id, input.vendor_id ?? null, input.bill_no ?? null, input.purchase_date ?? null],
-      );
+      // Only the fields actually sent are assigned — see editJob for why COALESCE
+      // is wrong here: it made bill_no impossible to clear.
+      const sets: string[] = [];
+      const vals: unknown[] = [id];
+      const put = (col: string, value: unknown) => {
+        vals.push(value);
+        sets.push(`${col} = $${vals.length}`);
+      };
+      if (input.vendor_id != null) put('vendor_id', input.vendor_id);
+      if (input.purchase_date != null) put('purchase_date', input.purchase_date);
+      if (input.bill_no !== undefined) put('bill_no', input.bill_no);
+      if (sets.length > 0) {
+        await client.query(`UPDATE purchases SET ${sets.join(', ')} WHERE id = $1`, vals);
+      }
 
       if (input.items !== undefined) {
         // The vendor tag / movement date reflect the (possibly updated) purchase head.

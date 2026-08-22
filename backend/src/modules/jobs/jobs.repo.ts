@@ -176,21 +176,25 @@ export const jobsRepo = {
       const ex = await client.query('SELECT id FROM jobs WHERE id=$1', [jobId]);
       if (!ex.rows[0]) return false;
 
-      await client.query(
-        `UPDATE jobs SET
-           status        = COALESCE($2, status),
-           notes         = COALESCE($3, notes),
-           job_date      = COALESCE($4, job_date),
-           expected_note = COALESCE($5, expected_note)
-         WHERE id = $1`,
-        [
-          jobId,
-          fields.status ?? null,
-          fields.notes ?? null,
-          fields.job_date ?? null,
-          fields.expected_note ?? null,
-        ],
-      );
+      // Build the SET list from only the fields the caller actually sent. COALESCE
+      // cannot tell "not provided" from "set this to null", so it made the nullable
+      // free-text columns impossible to clear: the UI reported success and kept the
+      // old value. Column names come from the literals below, never from the request.
+      const sets: string[] = [];
+      const vals: unknown[] = [jobId];
+      const put = (col: string, value: unknown) => {
+        vals.push(value);
+        sets.push(`${col} = $${vals.length}`);
+      };
+      // NOT NULL columns: only ever assigned a real value.
+      if (fields.status != null) put('status', fields.status);
+      if (fields.job_date != null) put('job_date', fields.job_date);
+      // Nullable free text: an explicit null clears it.
+      if (fields.notes !== undefined) put('notes', fields.notes);
+      if (fields.expected_note !== undefined) put('expected_note', fields.expected_note);
+      if (sets.length > 0) {
+        await client.query(`UPDATE jobs SET ${sets.join(', ')} WHERE id = $1`, vals);
+      }
 
       // A job's raw material moves in two directions — issued out, and unused
       // stock returned — and both are stock_movements on this job. Replacing the
