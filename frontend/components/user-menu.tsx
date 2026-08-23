@@ -57,16 +57,16 @@ export function UserMenu({ name, role, onLogout }: { name?: string; role?: strin
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex items-center gap-2 rounded-lg py-1 pl-1 pr-1.5 transition-colors hover:bg-surface-2"
+        className="flex items-center gap-2 rounded-lg py-1 pl-1 pr-1.5 transition-colors hover:bg-white/10"
       >
-        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-tint text-xs font-semibold text-primary">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/15 text-xs font-semibold text-white ring-1 ring-inset ring-white/15">
           {initials}
         </span>
         <span className="hidden text-left leading-tight sm:block">
-          <span className="block max-w-[9rem] truncate text-sm font-medium text-ink">{name}</span>
-          <span className="block text-xs text-muted">{roleLabel(role)}</span>
+          <span className="block max-w-[9rem] truncate text-sm font-medium text-white">{name}</span>
+          <span className="block text-xs text-white/60">{roleLabel(role)}</span>
         </span>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn("text-muted transition-transform", open && "rotate-180")} aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={cn("text-white/60 transition-transform", open && "rotate-180")} aria-hidden="true">
           <path d="m6 9 6 6 6-6" />
         </svg>
       </button>

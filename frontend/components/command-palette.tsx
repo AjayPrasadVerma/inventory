@@ -380,13 +380,13 @@ export function SearchTrigger() {
       type="button"
       onClick={() => openCommandPalette()}
       aria-label="Open search"
-      className="flex h-9 items-center gap-2 rounded-lg border border-border bg-surface-2 pl-2.5 pr-2 text-sm text-muted transition-colors hover:border-border-strong hover:text-ink sm:w-56 xl:w-72"
+      className="flex h-9 items-center gap-2 rounded-lg bg-white/10 pl-2.5 pr-2 text-sm text-white/60 ring-1 ring-inset ring-white/10 transition-colors hover:bg-white/15 hover:text-white/85 sm:w-56 xl:w-72"
     >
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="shrink-0" aria-hidden="true">
         <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" />
       </svg>
       <span className="hidden flex-1 text-left sm:block">Search anything…</span>
-      <kbd className="hidden shrink-0 rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] font-medium sm:block">⌘K</kbd>
+      <kbd className="hidden shrink-0 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-medium text-white/55 ring-1 ring-inset ring-white/10 sm:block">⌘K</kbd>
     </button>
   );
 }

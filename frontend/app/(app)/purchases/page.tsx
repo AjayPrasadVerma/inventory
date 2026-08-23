@@ -106,7 +106,7 @@ export default function PurchasesPage() {
                           <button onClick={(e) => { e.stopPropagation(); setPaying(p); }} className="inline-flex cursor-pointer items-center rounded-md bg-primary-tint px-2.5 text-xs font-medium text-primary transition-colors hover:bg-primary hover:text-primary-fg">Pay</button>
                           <button onClick={() => router.push(`/purchases/new?edit=${p.id}`)} className="inline-flex cursor-pointer items-center rounded-md bg-surface-2 px-2.5 text-xs font-medium text-ink transition-colors hover:bg-border-strong">Edit</button>
                           {user?.role === "owner" && (
-                            <button onClick={() => remove(p)} className="inline-flex cursor-pointer items-center rounded-md bg-[color:var(--danger-tint)] px-2.5 text-xs font-medium text-[color:var(--danger)] transition-colors hover:bg-[color:var(--danger)] hover:text-white">Delete</button>
+                            <button onClick={() => remove(p)} className="inline-flex cursor-pointer items-center rounded-md bg-surface-2 px-2.5 text-xs font-medium text-muted transition-colors hover:bg-[color:var(--danger)] hover:text-white">Delete</button>
                           )}
                         </div>
                       </td>

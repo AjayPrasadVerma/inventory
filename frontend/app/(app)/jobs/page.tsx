@@ -132,7 +132,7 @@ export default function JobsPage() {
                         </button>
                         <button onClick={() => router.push(`/jobs/detail?j=${j.id}&edit=1`)} className="inline-flex cursor-pointer items-center rounded-md bg-surface-2 px-2.5 text-xs font-medium text-ink transition-colors hover:bg-border-strong">Edit</button>
                         {user?.role === "owner" && (
-                          <button onClick={(e) => remove(e, j)} className="inline-flex cursor-pointer items-center rounded-md bg-[color:var(--danger-tint)] px-2.5 text-xs font-medium text-[color:var(--danger)] transition-colors hover:bg-[color:var(--danger)] hover:text-white">Delete</button>
+                          <button onClick={(e) => remove(e, j)} className="inline-flex cursor-pointer items-center rounded-md bg-surface-2 px-2.5 text-xs font-medium text-muted transition-colors hover:bg-[color:var(--danger)] hover:text-white">Delete</button>
                         )}
                       </div>
                     </td>
