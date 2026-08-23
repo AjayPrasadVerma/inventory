@@ -11,6 +11,11 @@ import { Spinner } from "@/components/ui/misc";
 
 export type CatalogueKind = "item" | "product";
 
+// Written out in full, not assembled: Tailwind scans source text, so a class
+// built from a template literal is never emitted and the row loses its columns.
+const OPEN_ROW_WITH_COLOUR = "grid grid-cols-[10rem_8rem_1fr_2.25rem] items-center gap-2";
+const OPEN_ROW_NO_COLOUR = "grid grid-cols-[8rem_1fr_2.25rem] items-center gap-2";
+
 export interface CatalogueRecord {
   kind: CatalogueKind;
   id: number;
@@ -68,6 +73,10 @@ export function CatalogueForm({
   const [prodOpeningSingle, setProdOpeningSingle] = useState("");
 
   const isRaw = kind === "item";
+
+  // Clicking Add repeatedly used to stack empty rows — five of them, in the
+  // report that prompted this.
+  const lastRawRowBlank = rawOpening.length > 0 && !rawOpening[rawOpening.length - 1]!.qty.trim();
 
   function addRawRow() {
     setRawOpening((r) => [...r, { color: variants[0] ?? "", unit: units[0] ?? "", qty: "" }]);
@@ -162,9 +171,6 @@ export function CatalogueForm({
             </Field>
           </div>
 
-          <Field label="Notes">
-            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </Field>
         </div>
 
         <div className="flex flex-col gap-4">
@@ -185,44 +191,63 @@ export function CatalogueForm({
             />
           </Field>
 
-          {!editing && (
+          <Field label="Notes">
+            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </Field>
+        </div>
+
+        {!editing && (
+          <div className="sm:col-span-2">
             <Field label="Opening stock (optional)" hint="Stock you already have — added once as an adjustment">
               {isRaw ? (
                 <div className="flex flex-col gap-2">
+                  {rawOpening.length > 0 && (
+                    <div className={variants.length > 0 ? OPEN_ROW_WITH_COLOUR : OPEN_ROW_NO_COLOUR}>
+                      {variants.length > 0 && <span className="text-xs font-medium text-muted">Colour</span>}
+                      <span className="text-xs font-medium text-muted">Unit</span>
+                      <span className="text-xs font-medium text-muted">Quantity</span>
+                      <span />
+                    </div>
+                  )}
                   {rawOpening.map((row, i) => (
-                    <div key={i} className="flex items-center gap-2">
+                    <div key={i} className={variants.length > 0 ? OPEN_ROW_WITH_COLOUR : OPEN_ROW_NO_COLOUR}>
                       {variants.length > 0 && (
-                        <div className="w-28 shrink-0">
-                          <Select value={row.color} onChange={(e) => setRawRow(i, "color", e.target.value)}>
-                            {variants.map((c) => <option key={c} value={c}>{c}</option>)}
-                          </Select>
-                        </div>
-                      )}
-                      <div className="w-24 shrink-0">
-                        <Select value={row.unit} onChange={(e) => setRawRow(i, "unit", e.target.value)}>
-                          {units.map((u) => <option key={u} value={u}>{u}</option>)}
+                        <Select value={row.color} onChange={(e) => setRawRow(i, "color", e.target.value)}>
+                          {variants.map((c) => <option key={c} value={c}>{c}</option>)}
                         </Select>
-                      </div>
-                      <Input value={row.qty} onChange={(e) => setRawRow(i, "qty", e.target.value)} inputMode="decimal" placeholder="Qty" />
+                      )}
+                      <Select value={row.unit} onChange={(e) => setRawRow(i, "unit", e.target.value)}>
+                        {units.map((u) => <option key={u} value={u}>{u}</option>)}
+                      </Select>
+                      <Input value={row.qty} onChange={(e) => setRawRow(i, "qty", e.target.value)} inputMode="decimal" placeholder="0" />
                       <button
                         type="button"
                         onClick={() => setRawOpening((r) => r.filter((_, idx) => idx !== i))}
-                        aria-label="Remove"
-                        className="shrink-0 cursor-pointer rounded-md px-2 py-1 text-muted hover:bg-surface-2 hover:text-[color:var(--danger)]"
+                        aria-label="Remove this line"
+                        className="cursor-pointer rounded-md px-2 py-1 text-muted hover:bg-surface-2 hover:text-[color:var(--danger)]"
                       >
                         ✕
                       </button>
                     </div>
                   ))}
-                  <Button variant="outline" size="sm" onClick={addRawRow} disabled={units.length === 0}>
-                    + Add opening stock
-                  </Button>
+                  <div className="flex items-center gap-3">
+                    <Button variant="outline" size="sm" onClick={addRawRow} disabled={units.length === 0 || lastRawRowBlank}>
+                      + Add opening stock
+                    </Button>
+                    {units.length === 0
+                      ? <span className="text-xs text-muted">Add a unit first</span>
+                      : lastRawRowBlank
+                        ? <span className="text-xs text-muted">Fill the quantity above first</span>
+                        : null}
+                  </div>
                 </div>
               ) : variants.length > 0 ? (
-                <div className="flex flex-col gap-2">
+                // Products have a fixed set of variants, so every one gets a box —
+                // two per row to use the full width.
+                <div className="grid gap-2 sm:grid-cols-2">
                   {variants.map((v) => (
-                    <div key={v} className="flex items-center gap-3">
-                      <span className="w-32 shrink-0 truncate text-sm text-muted">{v}</span>
+                    <div key={v} className="grid grid-cols-[10rem_1fr] items-center gap-2">
+                      <span className="truncate text-sm text-muted" title={v}>{v}</span>
                       <Input
                         value={prodOpening[v] ?? ""}
                         onChange={(e) => setProdOpening((o) => ({ ...o, [v]: e.target.value }))}
@@ -233,12 +258,13 @@ export function CatalogueForm({
                   ))}
                 </div>
               ) : (
-                <Input value={prodOpeningSingle} onChange={(e) => setProdOpeningSingle(e.target.value)} inputMode="decimal" placeholder="0" />
+                <div className="sm:w-64">
+                  <Input value={prodOpeningSingle} onChange={(e) => setProdOpeningSingle(e.target.value)} inputMode="decimal" placeholder="0" />
+                </div>
               )}
             </Field>
-          )}
-
-        </div>
+          </div>
+        )}
       </div>
     </Modal>
   );
