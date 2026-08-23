@@ -82,6 +82,10 @@ export function CommandPalette() {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const lastFocusRef = useRef<HTMLElement | null>(null);
+  // Each query gets a number; only the newest may write results. Without this a
+  // slow response for "abc" landing after a fast "xyz" replaced the visible hits
+  // with the wrong term's.
+  const queryIdRef = useRef(0);
 
   const close = useCallback(() => {
     setOpen(false);
@@ -90,10 +94,12 @@ export function CommandPalette() {
     setSelected(0);
   }, []);
 
-  // Hand focus back to whatever opened the palette. Done in an effect rather than
-  // inside close(), so no render-path function ever reads a ref.
+  // On close: discard any response still in flight, then hand focus back to
+  // whatever opened the palette. Both live in an effect rather than in close(),
+  // so no function reachable from the render path ever reads a ref.
   useEffect(() => {
     if (open) return;
+    queryIdRef.current += 1;
     lastFocusRef.current?.focus();
   }, [open]);
 
@@ -102,12 +108,14 @@ export function CommandPalette() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        lastFocusRef.current = document.activeElement as HTMLElement;
+        // Already open: keep the original opener, or Esc would return focus to
+        // the palette's own input, i.e. to nothing.
+        if (!open) lastFocusRef.current = document.activeElement as HTMLElement;
         setOpen(true);
       }
     };
     const onTrigger = () => {
-      lastFocusRef.current = document.activeElement as HTMLElement;
+      if (!open) lastFocusRef.current = document.activeElement as HTMLElement;
       setOpen(true);
     };
     document.addEventListener("keydown", onKey);
@@ -116,7 +124,7 @@ export function CommandPalette() {
       document.removeEventListener("keydown", onKey);
       window.removeEventListener(TRIGGER_EVENT, onTrigger);
     };
-  }, []);
+  }, [open]);
 
   // Lock the page behind the overlay and put the caret in the box.
   useEffect(() => {
@@ -127,15 +135,17 @@ export function CommandPalette() {
   }, [open]);
 
   const runSearch = useCallback(async (q: string) => {
+    const id = ++queryIdRef.current;
     if (q.trim().length < 2) { setGroups([]); setLoading(false); return; }
     setLoading(true);
     try {
       const res = await api<{ data: { groups: Group[] } }>(`/search?q=${encodeURIComponent(q.trim())}`);
+      if (id !== queryIdRef.current) return; // a newer query has since been issued
       setGroups(res.data.groups);
     } catch {
-      setGroups([]);
+      if (id === queryIdRef.current) setGroups([]);
     } finally {
-      setLoading(false);
+      if (id === queryIdRef.current) setLoading(false);
     }
   }, []);
 
@@ -207,8 +217,8 @@ export function CommandPalette() {
   // Keep the highlighted row visible. Done by data-index lookup so the list needs
   // one ref instead of one per row.
   useEffect(() => {
-    listRef.current?.querySelector(`[data-idx="${selected}"]`)?.scrollIntoView({ block: "nearest" });
-  }, [selected]);
+    listRef.current?.querySelector(`[data-idx="${activeIndex}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
 
   const activate = useCallback((row: Row) => {
     close();
@@ -257,6 +267,14 @@ export function CommandPalette() {
             onKeyDown={onKeyDown}
             placeholder="Search vendors, karigars, materials, products, bill no…"
             aria-label="Search"
+            // The API rejects anything longer, which the UI swallowed into a bare
+            // "Nothing found" — stop the input there instead.
+            maxLength={80}
+            role="combobox"
+            aria-expanded
+            aria-controls="palette-results"
+            aria-autocomplete="list"
+            aria-activedescendant={rows[activeIndex] ? `palette-row-${activeIndex}` : undefined}
             className="h-14 min-w-0 flex-1 bg-transparent text-[15px] text-ink outline-none placeholder:text-muted"
           />
           {searching && <Spinner className="h-4 w-4 shrink-0 text-muted" />}
@@ -265,7 +283,13 @@ export function CommandPalette() {
           </button>
         </div>
 
-        <div ref={listRef} className="max-h-[min(60vh,28rem)] overflow-y-auto py-1.5">
+        <div
+          ref={listRef}
+          id="palette-results"
+          role="listbox"
+          aria-label="Results and commands"
+          className="max-h-[min(60vh,28rem)] overflow-y-auto py-1.5"
+        >
           {rows.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted">
               {searching ? "Searching…" : <>Nothing found for <span className="font-medium text-ink">{term.trim()}</span></>}
@@ -282,6 +306,9 @@ export function CommandPalette() {
                   )}
                   <button
                     data-idx={i}
+                    id={`palette-row-${i}`}
+                    role="option"
+                    aria-selected={i === activeIndex}
                     onClick={() => activate(row)}
                     onMouseMove={() => setSelected(i)}
                     className={cn(
