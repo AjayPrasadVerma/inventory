@@ -112,6 +112,173 @@
   }
 }
 
+/* ---- Responsive data-entry rows ----
+   A line-item row is one flat grid of 9 controls with the labels living in a
+   separate header strip. That collapses on a phone: the header scrolls out of
+   sight and the right-hand fields (qty, rate, amount) sit off-screen entirely,
+   so a purchase cannot be entered at all.
+
+   Wrapping each control in .row-cell fixes it without duplicating any markup.
+   display:contents makes the wrapper transparent to the grid, so on desktop the
+   control itself is still the grid item and the layout is byte-identical. Below
+   the breakpoint the wrapper becomes a real box and prints its own label — which
+   is why it cannot stay display:contents there, as ::before generates no box. */
+.row-cell {
+  display: contents;
+}
+
+@media (max-width: 639px) {
+  .row-cell {
+    display: grid;
+    grid-template-columns: 4.75rem minmax(0, 1fr);
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+  .row-cell[data-label]::before {
+    content: attr(data-label);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  /* The row number and the remove button caption themselves. */
+  .row-cell:not([data-label]) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* Money reads better left-aligned once it is beside its own label. */
+  .row-cell input.text-right {
+    text-align: left;
+  }
+}
+
+/* ---- List tables on a phone ----
+   Eight columns in 375px meant names wrapped to three lines each while
+   Outstanding and Actions sat off the right edge. Each row becomes a card and
+   each cell labels itself from the header it lost. Rows stay clickable, which is
+   already how you open a detail hub.
+
+   Deliberately taking the cells out of table layout: normally a display change
+   on a td is the bug, here abandoning the table is the point, and it is scoped
+   to this breakpoint only. */
+@media (max-width: 767px) {
+  .data-table.stacked,
+  .data-table.stacked tbody,
+  .data-table.stacked tr,
+  .data-table.stacked td {
+    display: block;
+  }
+  .data-table.stacked thead {
+    display: none;
+  }
+  .data-table.stacked tbody tr {
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    margin-bottom: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.25rem 0;
+    background: var(--surface);
+  }
+  .data-table.stacked tbody tr:last-child {
+    margin-bottom: 0;
+  }
+  /* The hover fill is keyed to td on desktop; on a card it has to be the card. */
+  .data-table.stacked tbody tr:hover td {
+    background: transparent;
+  }
+  .data-table.stacked tbody td {
+    display: grid;
+    grid-template-columns: 7rem minmax(0, 1fr);
+    align-items: baseline;
+    gap: 0.5rem;
+    border-bottom: 0;
+    padding: 0.3rem 0.875rem;
+    max-width: none;
+    white-space: normal;
+  }
+  .data-table.stacked tbody td::before {
+    content: attr(data-label);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  /* Column alignment meant for a table column reads as a misindented label once
+     the cell is a labelled row of its own. */
+  .data-table.stacked tbody td.num,
+  .data-table.stacked tbody td.text-right,
+  .data-table.stacked tbody td.text-center {
+    text-align: left;
+  }
+  /* A cell with no label spans the card and keeps its own alignment — the row
+     counter and the action buttons. */
+  .data-table.stacked tbody td:not([data-label]) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .data-table.stacked tbody td:not([data-label])::before {
+    display: none;
+  }
+  /* The one unlabelled cell that is not the actions cell is the record's name —
+     it reads as the card's heading rather than as another labelled field. */
+  .data-table.stacked tbody td:not([data-label]):not(:last-child) {
+    order: -1;
+    padding-top: 0.5rem;
+    padding-bottom: 0.4rem;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  /* Actions sit under a rule at the foot of the card. */
+  .data-table.stacked tbody td:last-child:not([data-label]) {
+    margin-top: 0.25rem;
+    border-top: 1px solid var(--border);
+    padding-top: 0.5rem;
+    padding-bottom: 0.4rem;
+  }
+}
+
+/* ---- Bill-wise ledger (the vendor/karigar khata) on a phone ----
+   The T layout — goods on the left, that bill's own money on the right — needs
+   about 1040px, so on a phone the whole payment side sat off-screen and the
+   pairing the T exists to show was invisible. Each row becomes a card instead,
+   purchase above and its payments below, which keeps the pairing vertically.
+   The tds carry their own labels since the header is gone. */
+@media (max-width: 767px) {
+  .ledger-table,
+  .ledger-table tbody,
+  .ledger-table tfoot,
+  .ledger-table tr,
+  .ledger-table td {
+    display: block;
+  }
+  .ledger-table thead {
+    display: none;
+  }
+  .ledger-table tbody tr {
+    margin-bottom: 0.625rem;
+    overflow: hidden;
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
+  }
+  .ledger-table tbody tr:last-child {
+    margin-bottom: 0;
+  }
+  .ledger-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.125rem;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+}
+
 /* The brand mark reversed out for the dark top rail. Works because the source
    PNG is one flat colour: brightness(0) crushes it to black, invert lifts it to
    white. Only for use on --nav; the light drawer keeps the original blue. */

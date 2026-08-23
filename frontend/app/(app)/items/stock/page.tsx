@@ -154,7 +154,7 @@ export default function MaterialStockPage() {
           </div>
           <div className="overflow-hidden rounded-xl border border-border">
             <div className="max-h-[62vh] overflow-auto">
-              <table className="data-table sticky-head min-w-[820px]">
+              <table className="data-table stacked sticky-head sm:min-w-[820px]">
                 <thead>
                   <tr>
                     <th>Date</th><th>Type</th><th>From / To</th><th>Colour</th><th>Unit</th>
@@ -167,13 +167,13 @@ export default function MaterialStockPage() {
                     const label = e.reason === "adjustment" && e.note === "Opening stock" ? "Opening stock" : b.label;
                     return (
                       <tr key={i}>
-                        <td className="whitespace-nowrap text-muted">{formatDate(e.date)}</td>
-                        <td><Badge tone={b.tone}>{label}</Badge></td>
-                        <td className="text-ink">{e.party || "—"}</td>
-                        <td className="text-muted">{e.variant || "—"}</td>
-                        <td className="text-muted">{e.unit}</td>
-                        <td className="num">{e.qty > 0 ? fmtQty(e.qty) : "—"}</td>
-                        <td className="num">{e.qty < 0 ? fmtQty(-e.qty) : "—"}</td>
+                        <td data-label="Date" className="whitespace-nowrap text-muted">{formatDate(e.date)}</td>
+                        <td data-label="Type"><Badge tone={b.tone}>{label}</Badge></td>
+                        <td data-label="From / To" className="text-ink">{e.party || "—"}</td>
+                        <td data-label="Colour" className="text-muted">{e.variant || "—"}</td>
+                        <td data-label="Unit" className="text-muted">{e.unit}</td>
+                        <td data-label="In" className="num">{e.qty > 0 ? fmtQty(e.qty) : "—"}</td>
+                        <td data-label="Out" className="num">{e.qty < 0 ? fmtQty(-e.qty) : "—"}</td>
                       </tr>
                     );
                   })}

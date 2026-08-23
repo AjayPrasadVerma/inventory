@@ -80,9 +80,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Slim page bar — PageHeader portals its title/actions in here */}
       {showPageBar && (
-        <div className="z-20 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-surface px-3 sm:px-4 lg:px-5">
+        <div className="z-20 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-surface px-3 py-2 sm:h-14 sm:flex-nowrap sm:px-4 sm:py-0 lg:px-5">
           <div id="topbar-title" className="min-w-0 flex-1" />
-          <div id="topbar-actions" className="flex shrink-0 items-center gap-2" />
+          <div id="topbar-actions" className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:flex-none sm:flex-nowrap sm:shrink-0" />
         </div>
       )}
 

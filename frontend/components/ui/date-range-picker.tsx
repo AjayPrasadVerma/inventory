@@ -196,7 +196,7 @@ export function DateRangePicker({
         <div
           role="dialog"
           aria-label="Choose date range"
-          className="absolute left-0 z-40 mt-1 flex w-[min(94vw,46rem)] flex-col rounded-xl border border-border bg-surface shadow-[var(--shadow-md)] sm:flex-row"
+          className="absolute left-0 right-0 z-40 mt-1 flex flex-col rounded-xl border border-border bg-surface shadow-[var(--shadow-md)] sm:right-auto sm:w-[min(94vw,46rem)] sm:flex-row"
         >
           {/* Presets */}
           <div className="flex shrink-0 flex-row gap-1 overflow-x-auto border-b border-border p-2 sm:w-44 sm:flex-col sm:overflow-visible sm:border-b-0 sm:border-r">

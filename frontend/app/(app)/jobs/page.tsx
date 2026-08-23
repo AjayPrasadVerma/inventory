@@ -92,7 +92,7 @@ export default function JobsPage() {
         ) : (
           <>
           <div className="overflow-x-auto">
-            <table className="data-table">
+            <table className="data-table stacked">
               <thead>
                 <tr>
                   <th>Date</th>
@@ -106,13 +106,13 @@ export default function JobsPage() {
               <tbody>
                 {rows.map((j) => (
                   <tr key={j.id} className="clickable" onClick={() => router.push(`/jobs/detail?j=${j.id}`)}>
-                    <td className="text-muted">{formatDate(j.job_date)}</td>
+                    <td data-label="Date" className="text-muted">{formatDate(j.job_date)}</td>
                     <td className="font-medium text-ink">{j.karigar_name}</td>
-                    <td className="text-muted">{j.expected_note || "—"}</td>
-                    <td className="text-muted">
+                    <td data-label="Work" className="text-muted">{j.expected_note || "—"}</td>
+                    <td data-label="Material / Goods" className="text-muted">
                       {j.issue_lines} issued · {qty(j.received_qty)} received
                     </td>
-                    <td className="text-center">
+                    <td data-label="Status" className="text-center">
                       <Badge tone={j.status === "open" ? "warning" : "success"}>
                         {j.status === "open" ? "Open" : "Closed"}
                       </Badge>

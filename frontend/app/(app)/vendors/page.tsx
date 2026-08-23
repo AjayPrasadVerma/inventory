@@ -64,7 +64,7 @@ export default function VendorsPage() {
         count={total}
         actions={
           <>
-            <div className="relative w-48 sm:w-72 lg:w-96">
+            <div className="relative min-w-0 flex-1 sm:w-72 sm:flex-none lg:w-96">
               <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
               </span>
@@ -93,7 +93,7 @@ export default function VendorsPage() {
         ) : (
           <>
           <div className="overflow-x-auto">
-            <table className="data-table">
+            <table className="data-table stacked">
               <thead>
                 <tr>
                   <th className="w-14 num">S.No.</th>
@@ -116,13 +116,13 @@ export default function VendorsPage() {
                       onClick={() => router.push(`/vendors/account?v=${v.id}`)}
                       title="Open account"
                     >
-                      <td className="num text-muted">{(page - 1) * pageSize + i + 1}</td>
+                      <td data-label="S.No." className="num text-muted">{(page - 1) * pageSize + i + 1}</td>
                       <td className="font-semibold text-ink">{v.name}</td>
-                      <td>{v.phone || <span className="text-muted">—</span>}</td>
-                      <td>{v.city || <span className="text-muted">—</span>}</td>
-                      <td className="max-w-[16rem] truncate">{v.address || <span className="text-muted">—</span>}</td>
-                      <td className="max-w-[16rem] truncate">{v.notes || <span className="text-muted">—</span>}</td>
-                      <td className="num font-medium">
+                      <td data-label="Phone">{v.phone || <span className="text-muted">—</span>}</td>
+                      <td data-label="City">{v.city || <span className="text-muted">—</span>}</td>
+                      <td data-label="Address" className="max-w-[16rem] truncate">{v.address || <span className="text-muted">—</span>}</td>
+                      <td data-label="Notes" className="max-w-[16rem] truncate">{v.notes || <span className="text-muted">—</span>}</td>
+                      <td data-label="Outstanding" className="num font-medium">
                         {due > 0
                           ? <span className="text-[color:var(--warning)]">{rupees(due)}</span>
                           : <span className="text-muted">{rupees(due)}</span>}

@@ -204,7 +204,7 @@ export default function VendorAccountPage() {
       ) : khata ? (
         <>
           {/* Compact money strip */}
-          <div className="mt-2 grid grid-cols-3 gap-2">
+          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
             <Tile label="Total purchases" value={rupees(khata.totals.purchases + khata.opening)} tone="accent" />
             <Tile label="Total paid" value={rupees(khata.totals.paid)} tone="success" />
             <Tile label="Outstanding" value={rupees(khata.totals.outstanding)} tone={khata.totals.outstanding > 0 ? "warning" : "muted"} />
@@ -213,7 +213,7 @@ export default function VendorAccountPage() {
           {/* ── Bill-wise khata: goods on the left, that bill's money on the right ── */}
           <div className="mt-2 overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-xs)]">
             <div className="max-h-[calc(100vh-300px)] min-h-[16rem] overflow-auto">
-              <table className="w-full min-w-[1040px] border-separate border-spacing-0 text-base">
+              <table className="ledger-table w-full border-separate border-spacing-0 text-base md:min-w-[1040px]">
                 <thead className="sticky top-0 z-10">
                   <tr>
                     <th colSpan={3} className="border-b border-border-strong bg-surface-2 px-4 py-2.5 text-left text-sm font-semibold text-[color:var(--accent)]">
@@ -236,11 +236,11 @@ export default function VendorAccountPage() {
                 <tbody>
                   {bills.map((b) => {
                     const settled = b.remaining <= 0 && b.total > 0;
-                    const cell = `border-b border-border-strong px-4 py-2.5 align-top ${settled ? "bg-[color:var(--success-tint)]" : ""}`;
+                    const cell = `border-b border-border-strong px-4 py-2.5 align-top max-md:border-b-0 ${settled ? "bg-[color:var(--success-tint)]" : ""}`;
                     return (
                       <tr key={b.id}>
-                        <td className={`${cell} whitespace-nowrap font-mono text-sm font-semibold text-muted`}>{formatDate(b.date)}</td>
-                        <td className={cell}>
+                        <td data-label="Date" className={`${cell} whitespace-nowrap font-mono text-sm font-semibold text-muted`}>{formatDate(b.date)}</td>
+                        <td data-label="Bill no." className={cell}>
                           <span className="whitespace-nowrap font-mono text-[15px] font-semibold text-ink">{b.bill_no || `#${b.id}`}</span>
                           <span className="mt-1 flex gap-3 text-[13px]">
                             {/* Editing a bill rewrites stock and money, so the API gates it to
@@ -253,7 +253,7 @@ export default function VendorAccountPage() {
                             )}
                           </span>
                         </td>
-                        <td className={`${cell} text-[15px] font-medium`}>
+                        <td data-label="Items" className={`${cell} text-[15px] font-medium`}>
                           {b.items.length === 0 ? <span className="text-muted">—</span> : (
                             <>
                               {b.items.length > 3 && (
@@ -261,7 +261,7 @@ export default function VendorAccountPage() {
                                   {b.items.length} items
                                 </span>
                               )}
-                              <div className={b.items.length > 3 ? "columns-2 gap-x-8" : undefined}>
+                              <div className={b.items.length > 3 ? "sm:columns-2 sm:gap-x-8" : undefined}>
                                 {b.items.map((it, k) => (
                                   <span key={k} className="block break-inside-avoid">
                                     {it.name}
@@ -278,7 +278,7 @@ export default function VendorAccountPage() {
                             </>
                           )}
                         </td>
-                        <td className={`border-b border-l-2 border-border-strong border-l-border-strong px-4 py-2.5 align-top ${settled ? "bg-[color:var(--success-tint)]" : ""}`}>
+                        <td data-label="Payment" className={`border-b border-l-2 border-border-strong border-l-border-strong px-4 py-2.5 align-top max-md:border-b-0 max-md:border-l-0 max-md:border-t-2 ${settled ? "bg-[color:var(--success-tint)]" : ""}`}>
                           <MoneyBox
                             settled={settled}
                             total={b.total}
@@ -295,12 +295,12 @@ export default function VendorAccountPage() {
                   {/* Money paid with no bill attached — still reduces what the vendor is owed. */}
                   {unlinked.map((u) => (
                     <tr key={`u${u.id}`}>
-                      <td className="border-b border-border-strong px-4 py-2.5 align-top font-mono text-sm font-semibold text-muted">{formatDate(u.date)}</td>
-                      <td className="border-b border-border-strong px-4 py-2.5 align-top font-mono text-[15px] font-semibold text-muted">—</td>
-                      <td className="border-b border-border-strong px-4 py-2.5 align-top text-[15px] font-medium text-muted">
+                      <td data-label="Date" className="border-b border-border-strong px-4 py-2.5 align-top font-mono text-sm font-semibold text-muted max-md:border-b-0">{formatDate(u.date)}</td>
+                      <td data-label="Bill no." className="border-b border-border-strong px-4 py-2.5 align-top font-mono text-[15px] font-semibold text-muted max-md:border-b-0">—</td>
+                      <td data-label="Items" className="border-b border-border-strong px-4 py-2.5 align-top text-[15px] font-medium text-muted max-md:border-b-0">
                         On-account payment{u.note ? ` · ${u.note}` : ""}
                       </td>
-                      <td className="border-b border-l-2 border-border-strong border-l-border-strong px-4 py-2.5 align-top">
+                      <td data-label="Payment" className="border-b border-l-2 border-border-strong border-l-border-strong px-4 py-2.5 align-top max-md:border-b-0 max-md:border-l-0 max-md:border-t-2">
                         <div className="w-full">
                           <PayRow line={{ id: u.id, date: u.date, method: u.method, amount: u.amount, advance: false }}
                             onDelete={isOwner ? () => setPendingDelete({ kind: "payment", id: u.id, label: `${rupees(u.amount)} on ${formatDate(u.date)}` }) : undefined} />
@@ -322,7 +322,7 @@ export default function VendorAccountPage() {
                       {bills.length < khata.bills.length ? `${bills.length} of ${khata.bills.length}` : khata.bills.length} bills · {payCount} payments
                       {khata.opening > 0 && <> · opening {rupees(khata.opening)}</>}
                     </td>
-                    <td className="border-l-2 border-t border-border-strong border-l-border-strong bg-surface-2 px-4 py-2.5">
+                    <td className="border-l-2 border-t border-border-strong border-l-border-strong bg-surface-2 px-4 py-2.5 max-md:border-l-0">
                       <div className="flex flex-wrap gap-x-6 gap-y-1">
                         <Total label="Purchases" value={rupees(khata.totals.purchases + khata.opening)} />
                         <Total label="Paid" value={rupees(khata.totals.paid)} className="text-[color:var(--success)]" />

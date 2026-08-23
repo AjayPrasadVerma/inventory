@@ -13,8 +13,8 @@ export type CatalogueKind = "item" | "product";
 
 // Written out in full, not assembled: Tailwind scans source text, so a class
 // built from a template literal is never emitted and the row loses its columns.
-const OPEN_ROW_WITH_COLOUR = "grid grid-cols-[10rem_8rem_1fr_2.25rem] items-center gap-2";
-const OPEN_ROW_NO_COLOUR = "grid grid-cols-[8rem_1fr_2.25rem] items-center gap-2";
+const OPEN_ROW_WITH_COLOUR = "grid grid-cols-1 gap-2 sm:grid-cols-[10rem_8rem_1fr_2.25rem] sm:items-center";
+const OPEN_ROW_NO_COLOUR = "grid grid-cols-1 gap-2 sm:grid-cols-[8rem_1fr_2.25rem] sm:items-center";
 
 export interface CatalogueRecord {
   kind: CatalogueKind;
@@ -221,7 +221,7 @@ export function CatalogueForm({
               {isRaw ? (
                 <div className="flex flex-col gap-2">
                   {rawOpening.length > 0 && (
-                    <div className={variants.length > 0 ? OPEN_ROW_WITH_COLOUR : OPEN_ROW_NO_COLOUR}>
+                    <div className={`${variants.length > 0 ? OPEN_ROW_WITH_COLOUR : OPEN_ROW_NO_COLOUR} hidden sm:grid`}>
                       {variants.length > 0 && <span className="text-xs font-medium text-muted">Colour</span>}
                       <span className="text-xs font-medium text-muted">Unit</span>
                       <span className="text-xs font-medium text-muted">Quantity</span>
@@ -231,21 +231,30 @@ export function CatalogueForm({
                   {rawOpening.map((row, i) => {
                     const dup = dupRawRows.has(i);
                     return (
-                    <div key={i} className={variants.length > 0 ? OPEN_ROW_WITH_COLOUR : OPEN_ROW_NO_COLOUR}>
+                    <div
+                      key={i}
+                      className={`${variants.length > 0 ? OPEN_ROW_WITH_COLOUR : OPEN_ROW_NO_COLOUR} rounded-lg border border-border p-2 sm:rounded-none sm:border-0 sm:p-0`}
+                    >
                       {variants.length > 0 && (
-                        <Select value={row.color} invalid={dup} onChange={(e) => setRawRow(i, "color", e.target.value)}>
-                          {variants.map((c) => <option key={c} value={c}>{c}</option>)}
-                        </Select>
+                        <div className="row-cell" data-label="Colour">
+                          <Select value={row.color} invalid={dup} onChange={(e) => setRawRow(i, "color", e.target.value)}>
+                            {variants.map((c) => <option key={c} value={c}>{c}</option>)}
+                          </Select>
+                        </div>
                       )}
-                      <Select value={row.unit} invalid={dup} onChange={(e) => setRawRow(i, "unit", e.target.value)}>
-                        {units.map((u) => <option key={u} value={u}>{u}</option>)}
-                      </Select>
-                      <Input value={row.qty} invalid={dup} onChange={(e) => setRawRow(i, "qty", e.target.value)} inputMode="decimal" placeholder="0" />
+                      <div className="row-cell" data-label="Unit">
+                        <Select value={row.unit} invalid={dup} onChange={(e) => setRawRow(i, "unit", e.target.value)}>
+                          {units.map((u) => <option key={u} value={u}>{u}</option>)}
+                        </Select>
+                      </div>
+                      <div className="row-cell" data-label="Qty">
+                        <Input value={row.qty} invalid={dup} onChange={(e) => setRawRow(i, "qty", e.target.value)} inputMode="decimal" placeholder="0" />
+                      </div>
                       <button
                         type="button"
                         onClick={() => setRawOpening((r) => r.filter((_, idx) => idx !== i))}
                         aria-label="Remove this line"
-                        className="cursor-pointer rounded-md px-2 py-1 text-muted hover:bg-surface-2 hover:text-[color:var(--danger)]"
+                        className="cursor-pointer justify-self-end rounded-md px-2 py-1 text-muted hover:bg-surface-2 hover:text-[color:var(--danger)]"
                       >
                         ✕
                       </button>

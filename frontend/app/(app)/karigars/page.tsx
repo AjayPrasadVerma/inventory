@@ -80,7 +80,7 @@ export default function KarigarsPage() {
                 {productTypes.map((p) => <option key={p} value={p}>{p}</option>)}
               </Select>
             </div>
-            <div className="relative w-40 sm:w-64 lg:w-80">
+            <div className="relative min-w-0 flex-1 sm:w-64 sm:flex-none lg:w-80">
               <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
               </span>
@@ -107,7 +107,7 @@ export default function KarigarsPage() {
         ) : (
           <>
           <div className="overflow-x-auto">
-            <table className="data-table">
+            <table className="data-table stacked">
               <thead>
                 <tr>
                   <th className="w-14 num">S.No.</th>
@@ -127,18 +127,18 @@ export default function KarigarsPage() {
                       onClick={() => router.push(`/karigars/account?k=${k.id}`)}
                       title="Open account"
                     >
-                      <td className="num text-muted">{(page - 1) * pageSize + i + 1}</td>
+                      <td data-label="S.No." className="num text-muted">{(page - 1) * pageSize + i + 1}</td>
                       <td className="font-semibold text-ink">{k.name}</td>
-                      <td>{k.phone || <span className="text-muted">—</span>}</td>
-                      <td>
+                      <td data-label="Phone">{k.phone || <span className="text-muted">—</span>}</td>
+                      <td data-label="Products">
                         <div className="flex flex-wrap gap-1">
                           {k.product_types.length
                             ? k.product_types.map((p) => <Badge key={p} tone="accent">{p}</Badge>)
                             : <span className="text-muted">—</span>}
                         </div>
                       </td>
-                      <td className="max-w-[16rem] truncate">{k.notes || <span className="text-muted">—</span>}</td>
-                      <td className="num font-medium text-[color:var(--success)]">{rupees(Number(k.total_paid) || 0)}</td>
+                      <td data-label="Notes" className="max-w-[16rem] truncate">{k.notes || <span className="text-muted">—</span>}</td>
+                      <td data-label="Total paid" className="num font-medium text-[color:var(--success)]">{rupees(Number(k.total_paid) || 0)}</td>
                       <td onClick={(e) => e.stopPropagation()}>
                         <div className="flex justify-end gap-1.5">
                           <button onClick={() => setEditing(k)} className="inline-flex cursor-pointer items-center rounded-md bg-surface-2 px-2.5 text-xs font-medium text-ink transition-colors hover:bg-border-strong">Edit</button>

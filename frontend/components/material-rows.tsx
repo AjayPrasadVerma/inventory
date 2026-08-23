@@ -64,10 +64,12 @@ function focusRowSearch(container: HTMLElement | null, rowIndex: number) {
   inputs[rowIndex]?.focus();
 }
 
+// Single column on a phone, the original template from sm up. Each cell prints
+// its own label there — see .row-cell in globals.css.
 const GRID_MATERIAL =
-  "grid grid-cols-[2rem_minmax(0,1fr)_9rem_7rem_6.5rem_2.25rem] items-center gap-2";
+  "grid grid-cols-1 gap-2 sm:grid-cols-[2rem_minmax(0,1fr)_9rem_7rem_6.5rem_2.25rem] sm:items-center";
 const GRID_PRODUCT =
-  "grid grid-cols-[2rem_minmax(0,1fr)_11rem_6.5rem_2.25rem] items-center gap-2";
+  "grid grid-cols-1 gap-2 sm:grid-cols-[2rem_minmax(0,1fr)_11rem_6.5rem_2.25rem] sm:items-center";
 
 export function MaterialRows({
   items,
@@ -125,9 +127,9 @@ export function MaterialRows({
   return (
     <div className="rounded-[14px] border border-border overflow-hidden bg-surface">
       <div className="overflow-x-auto">
-        <div className="min-w-[620px]">
+        <div className="sm:min-w-[620px]">
           {/* header */}
-          <div className={`${GRID_MATERIAL} border-b border-border bg-surface-2 px-3 py-2 text-[10.5px] font-semibold uppercase tracking-wide text-muted`}>
+          <div className={`${GRID_MATERIAL} hidden border-b border-border bg-surface-2 px-3 py-2 text-[10.5px] font-semibold uppercase tracking-wide text-muted sm:grid`}>
             <span>#</span>
             <span>Material</span>
             <span>Color</span>
@@ -137,7 +139,7 @@ export function MaterialRows({
           </div>
 
           {/* rows */}
-          <div ref={containerRef} className="max-h-[46vh] overflow-y-auto">
+          <div ref={containerRef} className="sm:max-h-[46vh] sm:overflow-y-auto">
             {lines.map((l, idx) => {
               const item = byId.get(Number(l.itemId));
               const isLast = idx === lines.length - 1;
@@ -146,52 +148,62 @@ export function MaterialRows({
               return (
                 <div
                   key={l.key}
-                  className={`${GRID_MATERIAL} px-3 py-1.5 border-b border-border last:border-b-0 ${invalid ? "bg-[color:var(--danger-tint)]" : dup ? "bg-[color:var(--warning-tint)]" : ""}`}
+                  className={`${GRID_MATERIAL} border-b border-border px-3 py-3 sm:py-1.5 border-b border-border last:border-b-0 ${invalid ? "bg-[color:var(--danger-tint)]" : dup ? "bg-[color:var(--warning-tint)]" : ""}`}
                 >
-                  <span className="text-xs tabular-nums text-muted">{idx + 1}</span>
-                  <div data-row-search>
-                    <Combobox
-                      size="sm"
-                      options={options}
-                      value={l.itemId}
-                      onChange={(v) => onItem(l.key, v, isLast)}
-                      placeholder="Search material…"
-                      invalid={invalid && !l.itemId}
-                      ariaLabel={`Material for row ${idx + 1}`}
+                  <span className="text-xs font-semibold tabular-nums text-muted sm:font-normal">
+                    <span className="sm:hidden">Line </span>{idx + 1}
+                  </span>
+                  <div className="row-cell" data-label="Material">
+                    <div data-row-search>
+                      <Combobox
+                        size="sm"
+                        options={options}
+                        value={l.itemId}
+                        onChange={(v) => onItem(l.key, v, isLast)}
+                        placeholder="Search material…"
+                        invalid={invalid && !l.itemId}
+                        ariaLabel={`Material for row ${idx + 1}`}
+                      />
+                    </div>
+                  </div>
+                  <div className="row-cell" data-label="Color">
+                    <Select
+                      dense
+                      value={l.variantId}
+                      onChange={(e) => patch(l.key, { variantId: e.target.value })}
+                      disabled={!item?.variant_options.length}
+                      aria-label="Color"
+                    >
+                      <option value="">{item?.variant_options.length ? "Color…" : "—"}</option>
+                      {item?.variant_options.map((v) => <option key={v.id} value={v.id}>{v.color}</option>)}
+                    </Select>
+                  </div>
+                  <div className="row-cell" data-label="Unit">
+                    <Select
+                      dense
+                      value={l.unit}
+                      onChange={(e) => patch(l.key, { unit: e.target.value })}
+                      disabled={!item}
+                      invalid={invalid && !!l.itemId && !l.unit}
+                      aria-label="Unit"
+                    >
+                      <option value="">Unit</option>
+                      {item?.units.map((u) => <option key={u} value={u}>{u}</option>)}
+                    </Select>
+                  </div>
+                  <div className="row-cell" data-label="Qty">
+                    <Input
+                      dense
+                      className="text-right"
+                      placeholder="0"
+                      inputMode="decimal"
+                      value={l.qty}
+                      onChange={(e) => patch(l.key, { qty: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onQtyEnter(idx, isLast); } }}
+                      invalid={invalid && !!l.itemId && !(Number(l.qty) > 0)}
+                      aria-label="Quantity"
                     />
                   </div>
-                  <Select
-                    dense
-                    value={l.variantId}
-                    onChange={(e) => patch(l.key, { variantId: e.target.value })}
-                    disabled={!item?.variant_options.length}
-                    aria-label="Color"
-                  >
-                    <option value="">{item?.variant_options.length ? "Color…" : "—"}</option>
-                    {item?.variant_options.map((v) => <option key={v.id} value={v.id}>{v.color}</option>)}
-                  </Select>
-                  <Select
-                    dense
-                    value={l.unit}
-                    onChange={(e) => patch(l.key, { unit: e.target.value })}
-                    disabled={!item}
-                    invalid={invalid && !!l.itemId && !l.unit}
-                    aria-label="Unit"
-                  >
-                    <option value="">Unit</option>
-                    {item?.units.map((u) => <option key={u} value={u}>{u}</option>)}
-                  </Select>
-                  <Input
-                    dense
-                    className="text-right"
-                    placeholder="0"
-                    inputMode="decimal"
-                    value={l.qty}
-                    onChange={(e) => patch(l.key, { qty: e.target.value })}
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onQtyEnter(idx, isLast); } }}
-                    invalid={invalid && !!l.itemId && !(Number(l.qty) > 0)}
-                    aria-label="Quantity"
-                  />
                   <div className="flex justify-end">
                     {lines.length > 1 && (
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} aria-label={`Remove row ${idx + 1}`}>
@@ -265,15 +277,15 @@ export function ProductRows({
   return (
     <div className="rounded-[14px] border border-border overflow-hidden bg-surface">
       <div className="overflow-x-auto">
-        <div className="min-w-[560px]">
-          <div className={`${GRID_PRODUCT} border-b border-border bg-surface-2 px-3 py-2 text-[10.5px] font-semibold uppercase tracking-wide text-muted`}>
+        <div className="sm:min-w-[560px]">
+          <div className={`${GRID_PRODUCT} hidden border-b border-border bg-surface-2 px-3 py-2 text-[10.5px] font-semibold uppercase tracking-wide text-muted sm:grid`}>
             <span>#</span>
             <span>Product</span>
             <span>Variant</span>
             <span className="text-right">Qty</span>
             <span />
           </div>
-          <div ref={containerRef} className="max-h-[46vh] overflow-y-auto">
+          <div ref={containerRef} className="sm:max-h-[46vh] sm:overflow-y-auto">
             {lines.map((l, idx) => {
               const prod = byId.get(Number(l.productId));
               const isLast = idx === lines.length - 1;
@@ -281,41 +293,49 @@ export function ProductRows({
               return (
                 <div
                   key={l.key}
-                  className={`${GRID_PRODUCT} px-3 py-1.5 border-b border-border last:border-b-0 ${invalid ? "bg-[color:var(--danger-tint)]" : ""}`}
+                  className={`${GRID_PRODUCT} border-b border-border px-3 py-3 sm:py-1.5 border-b border-border last:border-b-0 ${invalid ? "bg-[color:var(--danger-tint)]" : ""}`}
                 >
-                  <span className="text-xs tabular-nums text-muted">{idx + 1}</span>
-                  <div data-row-search>
-                    <Combobox
-                      size="sm"
-                      options={options}
-                      value={l.productId}
-                      onChange={(v) => onProduct(l.key, v, isLast)}
-                      placeholder="Search product…"
-                      invalid={invalid && !l.productId}
-                      ariaLabel={`Product for row ${idx + 1}`}
+                  <span className="text-xs font-semibold tabular-nums text-muted sm:font-normal">
+                    <span className="sm:hidden">Line </span>{idx + 1}
+                  </span>
+                  <div className="row-cell" data-label="Product">
+                    <div data-row-search>
+                      <Combobox
+                        size="sm"
+                        options={options}
+                        value={l.productId}
+                        onChange={(v) => onProduct(l.key, v, isLast)}
+                        placeholder="Search product…"
+                        invalid={invalid && !l.productId}
+                        ariaLabel={`Product for row ${idx + 1}`}
+                      />
+                    </div>
+                  </div>
+                  <div className="row-cell" data-label="Variant">
+                    <Select
+                      dense
+                      value={l.variantId}
+                      onChange={(e) => patch(l.key, { variantId: e.target.value })}
+                      disabled={!prod?.variant_options.length}
+                      aria-label="Variant"
+                    >
+                      <option value="">{prod?.variant_options.length ? "Variant…" : "—"}</option>
+                      {prod?.variant_options.map((v) => <option key={v.id} value={v.id}>{v.variant}</option>)}
+                    </Select>
+                  </div>
+                  <div className="row-cell" data-label="Qty">
+                    <Input
+                      dense
+                      className="text-right"
+                      placeholder="0"
+                      inputMode="decimal"
+                      value={l.qty}
+                      onChange={(e) => patch(l.key, { qty: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onQtyEnter(idx, isLast); } }}
+                      invalid={invalid && !!l.productId && !(Number(l.qty) > 0)}
+                      aria-label="Quantity"
                     />
                   </div>
-                  <Select
-                    dense
-                    value={l.variantId}
-                    onChange={(e) => patch(l.key, { variantId: e.target.value })}
-                    disabled={!prod?.variant_options.length}
-                    aria-label="Variant"
-                  >
-                    <option value="">{prod?.variant_options.length ? "Variant…" : "—"}</option>
-                    {prod?.variant_options.map((v) => <option key={v.id} value={v.id}>{v.variant}</option>)}
-                  </Select>
-                  <Input
-                    dense
-                    className="text-right"
-                    placeholder="0"
-                    inputMode="decimal"
-                    value={l.qty}
-                    onChange={(e) => patch(l.key, { qty: e.target.value })}
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onQtyEnter(idx, isLast); } }}
-                    invalid={invalid && !!l.productId && !(Number(l.qty) > 0)}
-                    aria-label="Quantity"
-                  />
                   <div className="flex justify-end">
                     {lines.length > 1 && (
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} aria-label={`Remove row ${idx + 1}`}>
@@ -428,12 +448,14 @@ export function PricedRows({
   // a template literal is never emitted and the rows collapse to one column.
   const grid = kinds
     ? withUnit
-      ? "grid grid-cols-[2rem_8.5rem_minmax(0,1fr)_7.5rem_5.5rem_5rem_6rem_6.5rem_2.25rem] items-center gap-2"
-      : "grid grid-cols-[2rem_8.5rem_minmax(0,1fr)_9rem_5.5rem_6.5rem_7rem_2.25rem] items-center gap-2"
+      ? "grid grid-cols-1 gap-2 sm:grid-cols-[2rem_8.5rem_minmax(0,1fr)_7.5rem_5.5rem_5rem_6rem_6.5rem_2.25rem] sm:items-center"
+      : "grid grid-cols-1 gap-2 sm:grid-cols-[2rem_8.5rem_minmax(0,1fr)_9rem_5.5rem_6.5rem_7rem_2.25rem] sm:items-center"
     : withUnit
-      ? "grid grid-cols-[2rem_minmax(0,1fr)_7.5rem_5.5rem_5rem_6rem_6.5rem_2.25rem] items-center gap-2"
-      : "grid grid-cols-[2rem_minmax(0,1fr)_9rem_5.5rem_6.5rem_7rem_2.25rem] items-center gap-2";
-  const minW = kinds ? "min-w-[840px]" : withUnit ? "min-w-[720px]" : "min-w-[640px]";
+      ? "grid grid-cols-1 gap-2 sm:grid-cols-[2rem_minmax(0,1fr)_7.5rem_5.5rem_5rem_6rem_6.5rem_2.25rem] sm:items-center"
+      : "grid grid-cols-1 gap-2 sm:grid-cols-[2rem_minmax(0,1fr)_9rem_5.5rem_6.5rem_7rem_2.25rem] sm:items-center";
+  // The min width forces the horizontal scroll that makes the desktop grid work;
+  // on a phone the rows stack instead, so it must not apply.
+  const minW = kinds ? "sm:min-w-[840px]" : withUnit ? "sm:min-w-[720px]" : "sm:min-w-[640px]";
 
   function patch(key: number, p: Partial<PricedLine>) {
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...p } : l)));
@@ -471,7 +493,7 @@ export function PricedRows({
       <div className="overflow-x-auto">
         <div className={minW}>
           {/* header */}
-          <div className={`${grid} border-b border-border bg-surface-2 px-3 py-2 text-[10.5px] font-semibold uppercase tracking-wide text-muted`}>
+          <div className={`${grid} hidden border-b border-border bg-surface-2 px-3 py-2 text-[10.5px] font-semibold uppercase tracking-wide text-muted sm:grid`}>
             <span>#</span>
             {kinds && <span>Type</span>}
             <span>{primaryLabel}</span>
@@ -484,7 +506,7 @@ export function PricedRows({
           </div>
 
           {/* rows */}
-          <div ref={containerRef} className="max-h-[42vh] overflow-y-auto">
+          <div ref={containerRef} className="sm:max-h-[42vh] sm:overflow-y-auto">
             {lines.map((l, idx) => {
               const cat = byKind.get(l.kind) ?? [...byKind.values()][0]!;
               const item = cat.byId.get(Number(l.itemId));
@@ -492,63 +514,79 @@ export function PricedRows({
               const invalid = invalidKeys?.has(l.key);
               const amt = (Number(l.qty) || 0) * (Number(l.money) || 0);
               return (
-                <div key={l.key} className={`${grid} px-3 py-1.5 border-b border-border last:border-b-0 ${invalid ? "bg-[color:var(--danger-tint)]" : ""}`}>
-                  <span className="text-xs tabular-nums text-muted">{idx + 1}</span>
+                <div key={l.key} className={`${grid} border-b border-border px-3 py-3 last:border-b-0 sm:py-1.5 ${invalid ? "bg-[color:var(--danger-tint)]" : ""}`}>
+                  <span className="text-xs font-semibold tabular-nums text-muted sm:font-normal">
+                    <span className="sm:hidden">Line </span>{idx + 1}
+                  </span>
                   {kinds && (
-                    <Select dense value={l.kind} onChange={(e) => onKind(l.key, e.target.value)} aria-label={`Type for row ${idx + 1}`}>
-                      {kinds.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
-                    </Select>
+                    <div className="row-cell" data-label="Type">
+                      <Select dense value={l.kind} onChange={(e) => onKind(l.key, e.target.value)} aria-label={`Type for row ${idx + 1}`}>
+                        {kinds.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
+                      </Select>
+                    </div>
                   )}
-                  <div data-row-search>
-                    <Combobox
-                      size="sm"
-                      options={cat.combo}
-                      value={l.itemId}
-                      onChange={(v) => onPrimary(l.key, l.kind, v, isLast)}
-                      placeholder={primaryPlaceholder}
-                      invalid={invalid && !l.itemId}
-                      ariaLabel={`${primaryLabel} for row ${idx + 1}`}
-                    />
+                  <div className="row-cell" data-label={primaryLabel}>
+                    <div data-row-search>
+                      <Combobox
+                        size="sm"
+                        options={cat.combo}
+                        value={l.itemId}
+                        onChange={(v) => onPrimary(l.key, l.kind, v, isLast)}
+                        placeholder={primaryPlaceholder}
+                        invalid={invalid && !l.itemId}
+                        ariaLabel={`${primaryLabel} for row ${idx + 1}`}
+                      />
+                    </div>
                   </div>
-                  <Select
-                    dense
-                    value={l.variantId}
-                    onChange={(e) => patch(l.key, { variantId: e.target.value })}
-                    disabled={!item?.variants.length}
-                    aria-label={withUnit ? "Color" : "Variant"}
-                  >
-                    <option value="">{item?.variants.length ? variantPlaceholder : "—"}</option>
-                    {item?.variants.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
-                  </Select>
-                  {withUnit && (
+                  <div className="row-cell" data-label={withUnit ? "Color" : "Variant"}>
                     <Select
                       dense
-                      value={l.unit}
-                      onChange={(e) => patch(l.key, { unit: e.target.value })}
-                      disabled={!item || !item.units?.length}
-                      invalid={invalid && !!l.itemId && !l.unit}
-                      aria-label="Unit"
+                      value={l.variantId}
+                      onChange={(e) => patch(l.key, { variantId: e.target.value })}
+                      disabled={!item?.variants.length}
+                      aria-label={withUnit ? "Color" : "Variant"}
                     >
-                      {item && !item.units?.length
-                        ? <option value="pcs">pcs</option>
-                        : <><option value="">Unit</option>{item?.units?.map((u) => <option key={u} value={u}>{u}</option>)}</>}
+                      <option value="">{item?.variants.length ? variantPlaceholder : "—"}</option>
+                      {item?.variants.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
                     </Select>
+                  </div>
+                  {withUnit && (
+                    <div className="row-cell" data-label="Unit">
+                      <Select
+                        dense
+                        value={l.unit}
+                        onChange={(e) => patch(l.key, { unit: e.target.value })}
+                        disabled={!item || !item.units?.length}
+                        invalid={invalid && !!l.itemId && !l.unit}
+                        aria-label="Unit"
+                      >
+                        {item && !item.units?.length
+                          ? <option value="pcs">pcs</option>
+                          : <><option value="">Unit</option>{item?.units?.map((u) => <option key={u} value={u}>{u}</option>)}</>}
+                      </Select>
+                    </div>
                   )}
-                  <Input
-                    dense className="text-right" placeholder="0" inputMode="decimal"
-                    value={l.qty}
-                    onChange={(e) => patch(l.key, { qty: e.target.value })}
-                    invalid={invalid && !!l.itemId && !(Number(l.qty) > 0)}
-                    aria-label="Quantity"
-                  />
-                  <Input
-                    dense className="text-right" placeholder="0" inputMode="decimal"
-                    value={l.money}
-                    onChange={(e) => patch(l.key, { money: e.target.value })}
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onMoneyEnter(idx, isLast); } }}
-                    aria-label={moneyLabel}
-                  />
-                  <span className="text-right text-sm font-medium text-ink tabular-nums">{amt > 0 ? rupees(amt) : "—"}</span>
+                  <div className="row-cell" data-label="Qty">
+                    <Input
+                      dense className="text-right" placeholder="0" inputMode="decimal"
+                      value={l.qty}
+                      onChange={(e) => patch(l.key, { qty: e.target.value })}
+                      invalid={invalid && !!l.itemId && !(Number(l.qty) > 0)}
+                      aria-label="Quantity"
+                    />
+                  </div>
+                  <div className="row-cell" data-label={moneyLabel}>
+                    <Input
+                      dense className="text-right" placeholder="0" inputMode="decimal"
+                      value={l.money}
+                      onChange={(e) => patch(l.key, { money: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onMoneyEnter(idx, isLast); } }}
+                      aria-label={moneyLabel}
+                    />
+                  </div>
+                  <div className="row-cell" data-label="Amount">
+                    <span className="text-sm font-semibold text-ink tabular-nums sm:block sm:text-right sm:font-medium">{amt > 0 ? rupees(amt) : "—"}</span>
+                  </div>
                   <div className="flex justify-end">
                     {lines.length > 1 && (
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} aria-label={`Remove row ${idx + 1}`}>
