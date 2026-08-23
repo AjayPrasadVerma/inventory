@@ -54,7 +54,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </Link>
 
         {/* Desktop nav — scrolls horizontally as a safety if it ever overflows */}
-        <nav className="hidden min-w-0 flex-1 items-center gap-0.5 overflow-x-auto lg:flex">
+        <nav className="hidden min-w-0 flex-1 items-center justify-center gap-1 overflow-x-auto lg:flex">
           {NAV.map((item) => {
             const active = isActive(item.href);
             return (
