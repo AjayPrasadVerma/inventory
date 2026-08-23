@@ -117,6 +117,7 @@ export function CatalogueForm({
     <Modal
       open
       onClose={onClose}
+      size="xl"
       title={editing ? `Edit ${isRaw ? "raw material" : "product"}` : "New item"}
       footer={(close) => (
         <>
@@ -125,113 +126,119 @@ export function CatalogueForm({
         </>
       )}
     >
-      <div className="flex flex-col gap-4">
-        <Field
-          label="Type *"
-          hint={editing
-            ? "Type can't be changed — the stock history lives with it"
-            : "Raw material is issued to karigars; finished goods come back from them or are bought ready-made"}
-        >
-          <Select value={kind} onChange={(e) => setKind(e.target.value as CatalogueKind)} disabled={editing}>
-            <option value="item">Raw material</option>
-            <option value="product">Finished product</option>
-          </Select>
-        </Field>
-
-        <Field label="Name *">
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            autoFocus
-            placeholder={isRaw ? "Velvet, Board…" : "Ring Box, Necklace Stand…"}
-          />
-        </Field>
-
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Category" hint="Type a new one if needed">
-            <Input value={category} onChange={(e) => setCategory(e.target.value)} list="catalogue-cats" />
-            <datalist id="catalogue-cats">
-              {categories.map((c) => <option key={c} value={c} />)}
-            </datalist>
+      <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+        {/* Left: what the thing is. Right: how it is stocked. */}
+        <div className="flex flex-col gap-4">
+          <Field
+            label="Type *"
+            hint={editing
+              ? "Can't be changed — the stock history lives with it"
+              : "Raw material is issued to karigars; finished goods come back or are bought in"}
+          >
+            <Select value={kind} onChange={(e) => setKind(e.target.value as CatalogueKind)} disabled={editing}>
+              <option value="item">Raw material</option>
+              <option value="product">Finished product</option>
+            </Select>
           </Field>
-          <Field label="Low-stock alert" hint="Warn at this level">
-            <Input value={lowStock} onChange={(e) => setLowStock(e.target.value)} inputMode="decimal" />
+
+          <Field label="Name *">
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
+              placeholder={isRaw ? "Velvet, Board…" : "Ring Box, Necklace Stand…"}
+            />
+          </Field>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Category" hint="Type a new one if needed">
+              <Input value={category} onChange={(e) => setCategory(e.target.value)} list="catalogue-cats" />
+              <datalist id="catalogue-cats">
+                {categories.map((c) => <option key={c} value={c} />)}
+              </datalist>
+            </Field>
+            <Field label="Low-stock alert" hint="Warn at this level">
+              <Input value={lowStock} onChange={(e) => setLowStock(e.target.value)} inputMode="decimal" />
+            </Field>
+          </div>
+
+          <Field label="Notes">
+            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} />
           </Field>
         </div>
 
-        {isRaw && (
-          <Field label="Units *" hint="meter / roll / kilo — as received">
-            <TagInput value={units} onChange={setUnits} placeholder="meter…" suggestions={unitOptions} />
+        <div className="flex flex-col gap-4">
+          {isRaw && (
+            <Field label="Units *" hint="meter / roll / kilo — as received">
+              <TagInput value={units} onChange={setUnits} placeholder="meter…" suggestions={unitOptions} />
+            </Field>
+          )}
+
+          <Field
+            label={isRaw ? "Colours" : "Variants (size / design)"}
+            hint={isRaw ? "Each colour is tracked separately" : undefined}
+          >
+            <TagInput
+              value={variants}
+              onChange={setVariants}
+              placeholder={isRaw ? "Red, Blue…" : "Small, Large…"}
+            />
           </Field>
-        )}
 
-        <Field
-          label={isRaw ? "Colours" : "Variants (size / design)"}
-          hint={isRaw ? "Each colour is tracked separately" : undefined}
-        >
-          <TagInput
-            value={variants}
-            onChange={setVariants}
-            placeholder={isRaw ? "Red, Blue…" : "Small, Large…"}
-          />
-        </Field>
-
-        {!editing && (
-          <Field label="Opening stock (optional)" hint="Stock you already have — added once as an adjustment">
-            {isRaw ? (
-              <div className="flex flex-col gap-2">
-                {rawOpening.map((row, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    {variants.length > 0 && (
-                      <div className="w-28 shrink-0">
-                        <Select value={row.color} onChange={(e) => setRawRow(i, "color", e.target.value)}>
-                          {variants.map((c) => <option key={c} value={c}>{c}</option>)}
+          {!editing && (
+            <Field label="Opening stock (optional)" hint="Stock you already have — added once as an adjustment">
+              {isRaw ? (
+                <div className="flex flex-col gap-2">
+                  {rawOpening.map((row, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      {variants.length > 0 && (
+                        <div className="w-28 shrink-0">
+                          <Select value={row.color} onChange={(e) => setRawRow(i, "color", e.target.value)}>
+                            {variants.map((c) => <option key={c} value={c}>{c}</option>)}
+                          </Select>
+                        </div>
+                      )}
+                      <div className="w-24 shrink-0">
+                        <Select value={row.unit} onChange={(e) => setRawRow(i, "unit", e.target.value)}>
+                          {units.map((u) => <option key={u} value={u}>{u}</option>)}
                         </Select>
                       </div>
-                    )}
-                    <div className="w-24 shrink-0">
-                      <Select value={row.unit} onChange={(e) => setRawRow(i, "unit", e.target.value)}>
-                        {units.map((u) => <option key={u} value={u}>{u}</option>)}
-                      </Select>
+                      <Input value={row.qty} onChange={(e) => setRawRow(i, "qty", e.target.value)} inputMode="decimal" placeholder="Qty" />
+                      <button
+                        type="button"
+                        onClick={() => setRawOpening((r) => r.filter((_, idx) => idx !== i))}
+                        aria-label="Remove"
+                        className="shrink-0 cursor-pointer rounded-md px-2 py-1 text-muted hover:bg-surface-2 hover:text-[color:var(--danger)]"
+                      >
+                        ✕
+                      </button>
                     </div>
-                    <Input value={row.qty} onChange={(e) => setRawRow(i, "qty", e.target.value)} inputMode="decimal" placeholder="Qty" />
-                    <button
-                      type="button"
-                      onClick={() => setRawOpening((r) => r.filter((_, idx) => idx !== i))}
-                      aria-label="Remove"
-                      className="shrink-0 cursor-pointer rounded-md px-2 py-1 text-muted hover:bg-surface-2 hover:text-[color:var(--danger)]"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-                <Button variant="outline" size="sm" onClick={addRawRow} disabled={units.length === 0}>
-                  + Add opening stock
-                </Button>
-              </div>
-            ) : variants.length > 0 ? (
-              <div className="flex flex-col gap-2">
-                {variants.map((v) => (
-                  <div key={v} className="flex items-center gap-3">
-                    <span className="w-32 shrink-0 truncate text-sm text-muted">{v}</span>
-                    <Input
-                      value={prodOpening[v] ?? ""}
-                      onChange={(e) => setProdOpening((o) => ({ ...o, [v]: e.target.value }))}
-                      inputMode="decimal"
-                      placeholder="0"
-                    />
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <Input value={prodOpeningSingle} onChange={(e) => setProdOpeningSingle(e.target.value)} inputMode="decimal" placeholder="0" />
-            )}
-          </Field>
-        )}
+                  ))}
+                  <Button variant="outline" size="sm" onClick={addRawRow} disabled={units.length === 0}>
+                    + Add opening stock
+                  </Button>
+                </div>
+              ) : variants.length > 0 ? (
+                <div className="flex flex-col gap-2">
+                  {variants.map((v) => (
+                    <div key={v} className="flex items-center gap-3">
+                      <span className="w-32 shrink-0 truncate text-sm text-muted">{v}</span>
+                      <Input
+                        value={prodOpening[v] ?? ""}
+                        onChange={(e) => setProdOpening((o) => ({ ...o, [v]: e.target.value }))}
+                        inputMode="decimal"
+                        placeholder="0"
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <Input value={prodOpeningSingle} onChange={(e) => setProdOpeningSingle(e.target.value)} inputMode="decimal" placeholder="0" />
+              )}
+            </Field>
+          )}
 
-        <Field label="Notes">
-          <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </Field>
+        </div>
       </div>
     </Modal>
   );
