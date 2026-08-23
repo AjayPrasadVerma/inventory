@@ -171,9 +171,9 @@ export function CommandPalette() {
 
     return [
       nav("Dashboard", "/", Icon.Dashboard, "home overview"),
-      nav("Vendors", "/vendors", Icon.Vendor, "suppliers khata purchases"),
+      nav("Vendors", "/vendors", Icon.Vendor, "suppliers accounts purchases"),
       nav("Karigars", "/karigars", Icon.Karigar, "thekedaar jobs"),
-      nav("Products", "/products", Icon.Product, "raw material finished goods stock kapda board"),
+      nav("Products", "/products", Icon.Product, "raw material finished goods stock"),
       create("New vendor", "/vendors?new=1", "Add a raw material supplier"),
       create("New karigar", "/karigars?new=1", "Add a thekedaar"),
       create("New product", "/products?new=1", "Raw material or finished goods"),

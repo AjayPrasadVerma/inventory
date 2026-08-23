@@ -198,7 +198,7 @@ export default function VendorAccountPage() {
       {error && <p className="mt-3 text-sm text-[color:var(--danger)]">{error}</p>}
 
       {!vendorId ? (
-        <Card className="mt-3"><EmptyState title="Select a vendor" hint="Pick a vendor above to open its khata." /></Card>
+        <Card className="mt-3"><EmptyState title="Select a vendor" hint="Pick a vendor above to open its account." /></Card>
       ) : loading ? (
         <div className="py-20 text-center"><Spinner className="h-6 w-6 text-primary" /></div>
       ) : khata ? (

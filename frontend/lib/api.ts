@@ -45,18 +45,27 @@ export async function api<T = unknown>(path: string, opts: Options = {}): Promis
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   });
 
-  if (res.status === 401) {
-    clearToken();
-    if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
-      window.location.href = "/login";
-    }
-    throw new ApiError(401, "Login zaroori hai.");
-  }
-
+  // Read the body first: a 401 usually carries the reason, and throwing before
+  // reading it discarded exactly the message the user needed.
   const text = await res.text();
   const data = text ? JSON.parse(text) : {};
+
+  if (res.status === 401) {
+    const onLogin = typeof window !== "undefined" && window.location.pathname.startsWith("/login");
+    // A 401 while signing in means the credentials were rejected — say what the
+    // server said. A 401 anywhere else means the session is gone, so clear it and
+    // send them to sign in.
+    if (!onLogin) {
+      clearToken();
+      if (typeof window !== "undefined") window.location.href = "/login";
+    }
+    throw new ApiError(401, data?.error ?? (onLogin
+      ? "Sign in failed. Check your mobile number and password."
+      : "Your session has expired. Please sign in again."));
+  }
+
   if (!res.ok) {
-    throw new ApiError(res.status, data?.error ?? "Kuch galat ho gaya.");
+    throw new ApiError(res.status, data?.error ?? "Something went wrong. Please try again.");
   }
   return data as T;
 }

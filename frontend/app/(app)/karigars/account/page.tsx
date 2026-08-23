@@ -196,7 +196,7 @@ export default function KarigarAccountPage() {
       {error && <p className="mt-3 text-sm text-[color:var(--danger)]">{error}</p>}
 
       {!karigarId ? (
-        <Card className="mt-3"><EmptyState title="Select a karigar" hint="Pick a karigar above to open its khata." /></Card>
+        <Card className="mt-3"><EmptyState title="Select a karigar" hint="Pick a karigar above to open its account." /></Card>
       ) : loading ? (
         <div className="py-20 text-center"><Spinner className="h-6 w-6 text-primary" /></div>
       ) : khata ? (
@@ -223,9 +223,9 @@ export default function KarigarAccountPage() {
                   <tr className="text-xs uppercase tracking-[0.09em] text-muted">
                     <th className="w-28 whitespace-nowrap border-b border-border-strong bg-surface px-4 py-2 text-left font-semibold">Date</th>
                     <th className="w-32 whitespace-nowrap border-b border-border-strong bg-surface px-4 py-2 text-left font-semibold">Job</th>
-                    <th className="border-b border-border-strong bg-surface px-4 py-2 text-left font-semibold">Diya — raw material</th>
+                    <th className="border-b border-border-strong bg-surface px-4 py-2 text-left font-semibold">Issued — raw material</th>
                     <th className="w-[40%] whitespace-nowrap border-b border-l-2 border-border-strong border-l-border-strong bg-surface px-4 py-2 text-left font-semibold">
-                      Aaya — goods · paid
+                      Received — goods · paid
                     </th>
                   </tr>
                 </thead>

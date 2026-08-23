@@ -79,6 +79,30 @@ const RULES = [
       && !all.includes('UNUSED — SALE / CUSTOMER MODULE'),
   },
   {
+    id: 'hinglish-ui-string',
+    level: 'block',
+    why: 'UI strings and API error messages must be English (CLAUDE.md section 8) — the owner reads '
+       + 'Hinglish, the shop\'s customers and staff see a professional product. Comments may stay in '
+       + 'Hinglish; they carry the owner\'s own words. Domain nouns (vendor, karigar, thekedaar) are '
+       + 'deliberately kept and are not flagged.',
+    // Only where a user can actually read the text: UI code and API messages.
+    // Tests (developer-facing names), seed and migrations (the shop's own Hindi
+    // category names are legitimate DATA) are out of scope.
+    files: /(frontend\/(app|components|lib)\/.*\.tsx?$)|(backend\/src\/modules\/.*\.ts$)/,
+    test: (line) => {
+      const t = line.trim();
+      // Comments are exempt — this rule is about what a user sees.
+      if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return false;
+      const HINGLISH = /\b(zaroori|jaruri|kripya|galat|maal|kharid|bhugtan|hisaab|khata|kapda|bakaya|paisa|nahi|kitna|diya|aaya)\b/i;
+      // Only inside quoted strings: `khata` as an identifier or type name is fine.
+      for (const m of line.matchAll(/"([^"\\]*)"|'([^'\\]*)'/g)) {
+        const text = m[1] ?? m[2] ?? '';
+        if (HINGLISH.test(text)) return true;
+      }
+      return false;
+    },
+  },
+  {
     id: 'like-without-escape',
     level: 'warn',
     why: 'A user-supplied LIKE/ILIKE pattern with an unescaped % or _ is a wildcard: searching "%" '
