@@ -259,7 +259,14 @@ export const jobsRepo = {
       // Money paid for this job goes with it, so the karigar's total paid is
       // reversed too. (The FK is ON DELETE SET NULL, which would otherwise leave
       // these behind as untraceable on-account payments.)
-      await client.query(`DELETE FROM payments WHERE job_id = $1`, [id]);
+      // Scoped to this job's own karigar: never reach into another party's money,
+      // even if a stray link ever existed.
+      await client.query(
+        `DELETE FROM payments
+          WHERE job_id = $1 AND party_type = 'karigar'
+            AND party_id = (SELECT karigar_id FROM jobs WHERE id = $1)`,
+        [id],
+      );
       const res = await client.query(`DELETE FROM jobs WHERE id = $1`, [id]);
       return (res.rowCount ?? 0) > 0;
     });

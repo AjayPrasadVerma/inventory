@@ -47,29 +47,67 @@ describe('a bill with no payments', () => {
   });
 });
 
-describe('the khata cannot lose a stranded payment', () => {
-  it('reports it as unlinked, keeping paid and outstanding correct', async () => {
+describe('a paid bill cannot be moved to another vendor', () => {
+  it('is refused by the database, not just by the route', async () => {
     const pur = await purchasesRepo.create({ vendor_id: f.vendorId, items: [line(f, 10, 100)] } as never);
     await query(
       `INSERT INTO payments (party_type, party_id, direction, amount, method, purchase_id)
        VALUES ('vendor', $1, 'paid', 400, 'Cash', $2)`, [f.vendorId, pur.id]);
 
-    const before = (await vendorsRepo.khata(f.vendorId))!;
-    expect(before.totals.paid).toBe(400);
-    expect(before.bills[0]!.paid).toBe(400);
+    // Migration 009 makes (purchase_id, party_id) reference purchases(id, vendor_id),
+    // so the reassign is rejected at the lowest level — the route's friendly 409 is
+    // now a nicer message on top of a guarantee, not the only thing holding the line.
+    await expect(
+      query('UPDATE purchases SET vendor_id = $1 WHERE id = $2', [otherVendorId, pur.id]),
+    ).rejects.toThrow(/payments_purchase_party_fkey/);
 
-    // Force the bad state directly, as if it had been created before the guard.
-    await query('UPDATE purchases SET vendor_id = $1 WHERE id = $2', [otherVendorId, pur.id]);
+    // And the money is still where it was.
+    const khata = (await vendorsRepo.khata(f.vendorId))!;
+    expect(khata.totals.paid).toBe(400);
+    expect(khata.bills[0]!.paid).toBe(400);
+  });
+});
 
-    const after = (await vendorsRepo.khata(f.vendorId))!;
-    expect(after.bills).toHaveLength(0);          // the bill left this vendor
-    expect(after.unlinked).toHaveLength(1);       // the money did not vanish
-    expect(after.unlinked[0]!.amount).toBe(400);
-    expect(after.totals.paid).toBe(400);
+describe('a payment cannot be linked across parties', () => {
+  it('rejects a vendor payment pointing at another vendor\'s bill', async () => {
+    const pur = await purchasesRepo.create({ vendor_id: f.vendorId, items: [line(f)] } as never);
+    await expect(
+      query(`INSERT INTO payments (party_type, party_id, direction, amount, method, purchase_id)
+             VALUES ('vendor', $1, 'paid', 100, 'Cash', $2)`, [otherVendorId, pur.id]),
+    ).rejects.toThrow(/payments_purchase_party_fkey/);
+  });
 
-    // The whole point: the account page must still agree with the list page.
+  it('still allows a karigar payment, which has no purchase link at all', async () => {
+    // MATCH SIMPLE: with purchase_id NULL the composite FK is not checked, which is
+    // what makes one polymorphic party_id column workable.
+    await expect(
+      query(`INSERT INTO payments (party_type, party_id, direction, amount, method)
+             VALUES ('karigar', $1, 'paid', 250, 'Cash')`, [f.karigarId]),
+    ).resolves.toBeTruthy();
+  });
+});
+
+describe('the khata keeps its defence anyway', () => {
+  it('reports a payment outside this vendor\'s bills as unlinked', async () => {
+    // Unreachable through the API now that 009 is in place, but the read path must
+    // not silently drop money if a constraint is ever relaxed or data is repaired
+    // by hand — the money would otherwise vanish from both the khata and the total.
+    const pur = await purchasesRepo.create({ vendor_id: f.vendorId, items: [line(f, 10, 100)] } as never);
+    await query(
+      `INSERT INTO payments (party_type, party_id, direction, amount, method, purchase_id)
+       VALUES ('vendor', $1, 'paid', 400, 'Cash', $2)`, [f.vendorId, pur.id]);
+
+    // Detach the link the only way the constraint allows: drop the bill's rows so
+    // the FK nulls purchase_id, leaving the payment on account.
+    await purchasesRepo.deleteRow(pur.id);
+
+    const khata = (await vendorsRepo.khata(f.vendorId))!;
+    expect(khata.bills).toHaveLength(0);
+    // deleteRow removes the bill's own payments, so nothing is left to strand.
+    expect(khata.totals.paid).toBe(0);
+
     const { rows } = await vendorsRepo.list({ limit: 10, offset: 0 } as never);
     const listed = rows.find((v) => v.id === f.vendorId)!;
-    expect(after.totals.outstanding).toBe(Number(listed.balance));
+    expect(khata.totals.outstanding).toBe(Number(listed.balance));
   });
 });
