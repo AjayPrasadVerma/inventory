@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
@@ -78,6 +78,21 @@ export function CatalogueForm({
   // report that prompted this.
   const lastRawRowBlank = rawOpening.length > 0 && !rawOpening[rawOpening.length - 1]!.qty.trim();
 
+  /** Rows that repeat a colour+unit already claimed by another row that will be
+   *  submitted. Blank rows are excluded — they are simply not filled in yet. */
+  const dupRawRows = useMemo(() => {
+    const seen = new Map<string, number>();
+    const dups = new Set<number>();
+    rawOpening.forEach((row, i) => {
+      if (!row.qty.trim() || !row.unit) return;
+      const sig = `${row.color}::${row.unit}`;
+      const first = seen.get(sig);
+      if (first !== undefined) { dups.add(i); dups.add(first); }
+      else seen.set(sig, i);
+    });
+    return dups;
+  }, [rawOpening]);
+
   function addRawRow() {
     setRawOpening((r) => [...r, { color: variants[0] ?? "", unit: units[0] ?? "", qty: "" }]);
   }
@@ -88,6 +103,10 @@ export function CatalogueForm({
   async function save() {
     if (!name.trim()) { toast("Name is required", "error"); return; }
     if (isRaw && units.length === 0) { toast("Add at least one unit", "error"); return; }
+    if (isRaw && dupRawRows.size > 0) {
+      toast("Opening stock has the same colour and unit twice — combine those lines into one.", "error");
+      return;
+    }
     setSaving(true);
     try {
       const common = {
@@ -209,17 +228,19 @@ export function CatalogueForm({
                       <span />
                     </div>
                   )}
-                  {rawOpening.map((row, i) => (
+                  {rawOpening.map((row, i) => {
+                    const dup = dupRawRows.has(i);
+                    return (
                     <div key={i} className={variants.length > 0 ? OPEN_ROW_WITH_COLOUR : OPEN_ROW_NO_COLOUR}>
                       {variants.length > 0 && (
-                        <Select value={row.color} onChange={(e) => setRawRow(i, "color", e.target.value)}>
+                        <Select value={row.color} invalid={dup} onChange={(e) => setRawRow(i, "color", e.target.value)}>
                           {variants.map((c) => <option key={c} value={c}>{c}</option>)}
                         </Select>
                       )}
-                      <Select value={row.unit} onChange={(e) => setRawRow(i, "unit", e.target.value)}>
+                      <Select value={row.unit} invalid={dup} onChange={(e) => setRawRow(i, "unit", e.target.value)}>
                         {units.map((u) => <option key={u} value={u}>{u}</option>)}
                       </Select>
-                      <Input value={row.qty} onChange={(e) => setRawRow(i, "qty", e.target.value)} inputMode="decimal" placeholder="0" />
+                      <Input value={row.qty} invalid={dup} onChange={(e) => setRawRow(i, "qty", e.target.value)} inputMode="decimal" placeholder="0" />
                       <button
                         type="button"
                         onClick={() => setRawOpening((r) => r.filter((_, idx) => idx !== i))}
@@ -229,7 +250,8 @@ export function CatalogueForm({
                         ✕
                       </button>
                     </div>
-                  ))}
+                    );
+                  })}
                   <div className="flex items-center gap-3">
                     <Button variant="outline" size="sm" onClick={addRawRow} disabled={units.length === 0 || lastRawRowBlank}>
                       + Add opening stock
@@ -238,7 +260,11 @@ export function CatalogueForm({
                       ? <span className="text-xs text-muted">Add a unit first</span>
                       : lastRawRowBlank
                         ? <span className="text-xs text-muted">Fill the quantity above first</span>
-                        : null}
+                        : dupRawRows.size > 0
+                          ? <span className="text-xs font-medium text-[color:var(--danger)]">
+                              The highlighted lines repeat a colour and unit — combine them, or they will be added together.
+                            </span>
+                          : null}
                   </div>
                 </div>
               ) : variants.length > 0 ? (
