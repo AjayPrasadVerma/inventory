@@ -81,7 +81,7 @@ export default function PurchasesPage() {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="data-table">
+              <table className="data-table stacked">
                 <thead>
                   <tr>
                     <th>Date</th>
@@ -93,9 +93,9 @@ export default function PurchasesPage() {
                 <tbody>
                   {rows.map((p) => (
                     <tr key={p.id} className="cursor-pointer" onClick={() => router.push(`/purchases/new?edit=${p.id}`)}>
-                      <td className="text-muted">{formatDate(p.purchase_date)}</td>
+                      <td data-label="Date" className="text-muted">{formatDate(p.purchase_date)}</td>
                       <td className="font-medium text-ink">{p.vendor_name}</td>
-                      <td className="max-w-[26rem] truncate text-muted">
+                      <td data-label="Items" className="max-w-[26rem] truncate text-muted">
                         {itemsLabel(p.items)}
                         {p.items && p.items.length > 2 && (
                           <span className="text-muted/70"> +{p.items.length - 2} more</span>

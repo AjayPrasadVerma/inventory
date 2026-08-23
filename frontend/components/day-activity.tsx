@@ -83,7 +83,7 @@ export function DayActivity() {
   return (
     <Card className="overflow-hidden">
       <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-2.5">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 basis-full sm:flex-1 sm:basis-auto">
           <h2 className="text-sm font-semibold text-ink">
             {isToday ? "Today's activity" : `Activity — ${formatDate(date)}`}
           </h2>

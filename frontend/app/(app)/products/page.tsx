@@ -93,7 +93,7 @@ export default function CataloguePage() {
         count={total}
         actions={
           <>
-            <div className="relative w-40 sm:w-56 lg:w-72">
+            <div className="relative min-w-0 basis-full sm:w-56 sm:basis-auto lg:w-72">
               <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
               </span>
@@ -105,14 +105,14 @@ export default function CataloguePage() {
                 className="h-10 w-full rounded-lg border border-border bg-surface pl-9 pr-3 text-sm text-ink shadow-xs outline-none placeholder:text-muted focus:border-primary"
               />
             </div>
-            <div className="w-36">
+            <div className="min-w-0 flex-1 sm:w-36 sm:flex-none">
               <Select value={kind} onChange={(e) => setKind(e.target.value as "" | CatalogueKind)} aria-label="Type">
                 <option value="">All types</option>
                 <option value="item">Raw material</option>
                 <option value="product">Finished</option>
               </Select>
             </div>
-            <div className="w-36">
+            <div className="min-w-0 flex-1 sm:w-36 sm:flex-none">
               <Select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category">
                 <option value="">All categories</option>
                 {categories.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -133,7 +133,7 @@ export default function CataloguePage() {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="data-table">
+              <table className="data-table stacked">
                 <thead>
                   <tr>
                     <th className="w-14 num">S.No.</th>
@@ -156,19 +156,19 @@ export default function CataloguePage() {
                         onClick={() => router.push(stockHref(r))}
                         title="Open stock"
                       >
-                        <td className="num text-muted">{(page - 1) * pageSize + i + 1}</td>
+                        <td data-label="S.No." className="num text-muted">{(page - 1) * pageSize + i + 1}</td>
                         <td className="font-semibold text-ink">{r.name}</td>
-                        <td>
+                        <td data-label="Type">
                           <span className={`rounded px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${KIND_TONE[r.kind]}`}>
                             {KIND_LABEL[r.kind]}
                           </span>
                         </td>
-                        <td>{r.category || <span className="text-muted">—</span>}</td>
-                        <td>{r.units.length > 0 ? r.units.join(", ") : <span className="text-muted">—</span>}</td>
-                        <td className="max-w-[16rem] truncate">
+                        <td data-label="Category">{r.category || <span className="text-muted">—</span>}</td>
+                        <td data-label="Units">{r.units.length > 0 ? r.units.join(", ") : <span className="text-muted">—</span>}</td>
+                        <td data-label="Colours" className="max-w-[16rem] truncate">
                           {r.variants.length > 0 ? r.variants.join(", ") : <span className="text-muted">—</span>}
                         </td>
-                        <td className={`num font-medium ${oversold ? "text-[color:var(--danger)]" : ""}`}>
+                        <td data-label="In stock" className={`num font-medium ${oversold ? "text-[color:var(--danger)]" : ""}`}>
                           {r.on_hand.length === 0
                             ? <span className="text-muted">—</span>
                             : r.on_hand.map((o) => `${fmtQty(o.qty)} ${o.unit}`).join(", ")}

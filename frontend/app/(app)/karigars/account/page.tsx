@@ -201,7 +201,7 @@ export default function KarigarAccountPage() {
         <div className="py-20 text-center"><Spinner className="h-6 w-6 text-primary" /></div>
       ) : khata ? (
         <>
-          <div className="mt-2 grid grid-cols-3 gap-2">
+          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
             <Tile label="Total jobs" value={String(khata.totals.jobs)} tone="accent" />
             <Tile label="Open jobs" value={String(khata.totals.open)} tone={khata.totals.open > 0 ? "warning" : "muted"} />
             <Tile label="Total paid" value={rupees(khata.totals.paid)} tone="success" />
@@ -210,7 +210,7 @@ export default function KarigarAccountPage() {
           {/* ── Job-wise khata: what went out (diya) against what came back (aaya) ── */}
           <div className="mt-2 overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-xs)]">
             <div className="max-h-[calc(100vh-300px)] min-h-[16rem] overflow-auto">
-              <table className="w-full min-w-[1040px] border-separate border-spacing-0 text-base">
+              <table className="ledger-table w-full border-separate border-spacing-0 text-base md:min-w-[1040px]">
                 <thead className="sticky top-0 z-10">
                   <tr>
                     <th colSpan={3} className="border-b border-border-strong bg-surface-2 px-4 py-2.5 text-left text-sm font-semibold text-[color:var(--accent)]">
@@ -233,11 +233,11 @@ export default function KarigarAccountPage() {
                 <tbody>
                   {jobs.map((j) => {
                     const done = j.status === "closed";
-                    const cell = `border-b border-border-strong px-4 py-2.5 align-top ${done ? "bg-[color:var(--success-tint)]" : ""}`;
+                    const cell = `border-b border-border-strong px-4 py-2.5 align-top max-md:border-b-0 ${done ? "bg-[color:var(--success-tint)]" : ""}`;
                     return (
                       <tr key={j.id}>
-                        <td className={`${cell} whitespace-nowrap font-mono text-sm font-semibold text-muted`}>{formatDate(j.date)}</td>
-                        <td className={cell}>
+                        <td data-label="Date" className={`${cell} whitespace-nowrap font-mono text-sm font-semibold text-muted`}>{formatDate(j.date)}</td>
+                        <td data-label="Job" className={cell}>
                           <span className="whitespace-nowrap font-mono text-[15px] font-semibold text-ink">#{j.id}</span>
                           {j.note && <span className="mt-0.5 block max-w-[9rem] truncate text-[12px] text-muted" title={j.note}>{j.note}</span>}
                           <span className="mt-1 flex gap-3 text-[13px]">
@@ -247,7 +247,7 @@ export default function KarigarAccountPage() {
                             )}
                           </span>
                         </td>
-                        <td className={`${cell} text-[15px] font-medium`}>
+                        <td data-label="Issued — raw material" className={`${cell} text-[15px] font-medium`}>
                           {j.issued.length === 0 ? <span className="text-muted">—</span> : (
                             <>
                               {j.issued.length > 3 && (
@@ -255,7 +255,7 @@ export default function KarigarAccountPage() {
                                   {j.issued.length} items
                                 </span>
                               )}
-                              <div className={j.issued.length > 3 ? "columns-2 gap-x-8" : undefined}>
+                              <div className={j.issued.length > 3 ? "sm:columns-2 sm:gap-x-8" : undefined}>
                                 {j.issued.map((it, k) => (
                                   <span key={k} className="block break-inside-avoid">
                                     {it.name}
@@ -272,7 +272,7 @@ export default function KarigarAccountPage() {
                             </span>
                           )}
                         </td>
-                        <td className={`border-b border-l-2 border-border-strong border-l-border-strong px-4 py-2.5 align-top ${done ? "bg-[color:var(--success-tint)]" : ""}`}>
+                        <td data-label="Received — goods · paid" className={`border-b border-l-2 border-border-strong border-l-border-strong px-4 py-2.5 align-top max-md:border-b-0 max-md:border-l-0 max-md:border-t-2 ${done ? "bg-[color:var(--success-tint)]" : ""}`}>
                           <ReturnBox
                             done={done}
                             received={j.received}
@@ -290,12 +290,12 @@ export default function KarigarAccountPage() {
                   {/* Lump sums not tied to any job — still part of what the karigar was paid. */}
                   {unlinked.map((u) => (
                     <tr key={`u${u.id}`}>
-                      <td className="border-b border-border-strong px-4 py-2.5 align-top font-mono text-sm font-semibold text-muted">{formatDate(u.date)}</td>
-                      <td className="border-b border-border-strong px-4 py-2.5 align-top font-mono text-[15px] text-muted">—</td>
-                      <td className="border-b border-border-strong px-4 py-2.5 align-top text-[15px] font-medium text-muted">
+                      <td data-label="Date" className="border-b border-border-strong px-4 py-2.5 align-top font-mono text-sm font-semibold text-muted max-md:border-b-0">{formatDate(u.date)}</td>
+                      <td data-label="Job" className="border-b border-border-strong px-4 py-2.5 align-top font-mono text-[15px] text-muted max-md:border-b-0">—</td>
+                      <td data-label="Issued — raw material" className="border-b border-border-strong px-4 py-2.5 align-top text-[15px] font-medium text-muted max-md:border-b-0">
                         Payment not tied to a job{u.note ? ` · ${u.note}` : ""}
                       </td>
-                      <td className="border-b border-l-2 border-border-strong border-l-border-strong px-4 py-2.5 align-top">
+                      <td data-label="Received — goods · paid" className="border-b border-l-2 border-border-strong border-l-border-strong px-4 py-2.5 align-top max-md:border-b-0 max-md:border-l-0 max-md:border-t-2">
                         <PayRow line={{ id: u.id, date: u.date, method: u.method, amount: u.amount }}
                           onDelete={isOwner ? () => setPendingDelete({ kind: "payment", id: u.id, label: `${rupees(u.amount)} on ${formatDate(u.date)}` }) : undefined} />
                       </td>
@@ -314,7 +314,7 @@ export default function KarigarAccountPage() {
                     <td colSpan={3} className="border-t border-border-strong bg-surface-2 px-4 py-2.5 text-[12.5px] font-semibold uppercase tracking-wide text-muted">
                       {jobs.length < khata.jobs.length ? `${jobs.length} of ${khata.jobs.length}` : khata.jobs.length} jobs · {payCount} payments
                     </td>
-                    <td className="border-l-2 border-t border-border-strong border-l-border-strong bg-surface-2 px-4 py-2.5" />
+                    <td className="border-l-2 border-t border-border-strong border-l-border-strong bg-surface-2 px-4 py-2.5 max-md:hidden" />
                   </tr>
                 </tfoot>
               </table>
