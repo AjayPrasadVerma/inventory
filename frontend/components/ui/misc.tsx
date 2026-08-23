@@ -45,9 +45,9 @@ export function Spinner({ className }: { className?: string }) {
 
 export function EmptyState({ title, hint }: { title: string; hint?: string }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-1 py-16 text-center">
+    <div className="flex flex-col items-center justify-center gap-1 px-4 py-10 text-center">
       <p className="text-sm font-medium text-ink">{title}</p>
-      {hint && <p className="text-sm text-muted">{hint}</p>}
+      {hint && <p className="max-w-md text-[13px] text-muted">{hint}</p>}
     </div>
   );
 }

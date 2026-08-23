@@ -4,13 +4,13 @@
 
 /* ---- Royal Indigo & Gold theme tokens ---- */
 :root {
-  --background: #f4f5f9;
+  --background: #e9ecf5;
   --surface: #ffffff;
-  --surface-2: #f0f1f7;
+  --surface-2: #f2f4fa;
   --ink: #1a1c2e;
-  --muted: #6b7191;
-  --border: #e6e8f0;
-  --border-strong: #d7dae6;
+  --muted: #676d8c;
+  --border: #dfe3ef;
+  --border-strong: #c5cbdf;
   --primary: #2e3577;
   --primary-hover: #262c63;
   --primary-fg: #ffffff;
@@ -23,11 +23,14 @@
   --warning-tint: #fbeed6;
   --danger: #c0442e;
   --danger-tint: #f7e1dc;
+  --info: #1d7488;
+  --info-tint: #e0eef1;
   --ring: #2e3577;
   --sidebar: #ffffff;
-  --shadow-xs: 0 1px 2px rgba(20, 22, 55, 0.05);
-  --shadow-sm: 0 1px 2px rgba(20, 22, 55, 0.05), 0 2px 5px rgba(20, 22, 55, 0.05);
-  --shadow-md: 0 4px 14px rgba(20, 22, 55, 0.09);
+  --nav: #1b204c;
+  --shadow-xs: 0 1px 2px rgba(20, 22, 55, 0.06);
+  --shadow-sm: 0 1px 2px rgba(20, 22, 55, 0.06), 0 2px 6px rgba(20, 22, 55, 0.06);
+  --shadow-md: 0 6px 18px rgba(20, 22, 55, 0.11);
 }
 
 .dark {
@@ -50,9 +53,11 @@
   --warning-tint: #2c2410;
   --danger: #e0664f;
   --danger-tint: #2e1815;
+  --info: #4fb0c6;
+  --info-tint: #12262b;
   --ring: #7c86d6;
-  --sidebar: #15162100;
   --sidebar: #14151f;
+  --nav: #0c0d14;
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.32);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
@@ -78,8 +83,11 @@
   --color-warning-tint: var(--warning-tint);
   --color-danger: var(--danger);
   --color-danger-tint: var(--danger-tint);
+  --color-info: var(--info);
+  --color-info-tint: var(--info-tint);
   --color-ring: var(--ring);
   --color-sidebar: var(--sidebar);
+  --color-nav: var(--nav);
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
@@ -104,6 +112,13 @@
   }
 }
 
+/* The brand mark reversed out for the dark top rail. Works because the source
+   PNG is one flat colour: brightness(0) crushes it to black, invert lifts it to
+   white. Only for use on --nav; the light drawer keeps the original blue. */
+.brand-reverse {
+  filter: brightness(0) invert(1);
+}
+
 /* ---- Reusable professional surfaces ---- */
 .soft-card {
   background: var(--surface);
@@ -120,15 +135,15 @@
   font-size: 14px;
 }
 .data-table thead th {
-  background: var(--surface-2);
+  background: var(--background);
   color: var(--muted);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   text-align: left;
-  padding: 7px 14px;
-  border-bottom: 1px solid var(--border);
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-strong);
   white-space: nowrap;
 }
 .data-table thead th:first-child { border-top-left-radius: 12px; }

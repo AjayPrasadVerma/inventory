@@ -8,13 +8,14 @@ import { Badge, Card, Spinner } from "@/components/ui/misc";
 import { Icon } from "@/components/icons";
 import { DayActivity } from "@/components/day-activity";
 
-type Tone = "primary" | "accent" | "success" | "warning" | "danger";
+type Tone = "primary" | "accent" | "success" | "warning" | "danger" | "info";
 const TINT: Record<Tone, { bg: string; fg: string }> = {
   primary: { bg: "var(--primary-tint)", fg: "var(--primary)" },
   accent: { bg: "var(--accent-tint)", fg: "var(--accent)" },
   success: { bg: "var(--success-tint)", fg: "var(--success)" },
   warning: { bg: "var(--warning-tint)", fg: "var(--warning)" },
   danger: { bg: "var(--danger-tint)", fg: "var(--danger)" },
+  info: { bg: "var(--info-tint)", fg: "var(--info)" },
 };
 const HEALTH = { low: "#e0a03a", oversold: "#e0664f" } as const;
 
@@ -78,10 +79,10 @@ export default function DashboardPage() {
         <div className="space-y-6">
           {/* Hero KPIs */}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Hero label="Finished Goods in Stock" value={fmtQty(finishedTotal)} hint={`across ${data?.products ?? 0} products`} icon={<Icon.Product />} tone="primary" href="/reports/finished-stock" />
+            <Hero label="Finished Goods" value={fmtQty(finishedTotal)} hint={`across ${data?.products ?? 0} products`} icon={<Icon.Product />} tone="primary" href="/reports/finished-stock" />
             <Hero label="Raw Materials" value={data?.rawMaterials ?? 0} hint={`${rawLines} stock lines`} icon={<Icon.Item />} tone="accent" href="/reports/raw-stock" />
-            <Hero label="Low / Oversold Stock" value={data?.lowStockCount ?? 0} hint={data && data.lowStockCount > 0 ? "Needs restocking" : "All healthy"} icon={<Icon.Report />} tone={data && data.lowStockCount > 0 ? "danger" : "success"} href="/reports/low-stock" />
-            <Hero label="Open Jobs" value={data?.openJobs ?? 0} hint="Material out with karigars" icon={<Icon.Job />} tone="warning" href="/karigars" />
+            <Hero label="Low / Oversold" value={data?.lowStockCount ?? 0} hint={data && data.lowStockCount > 0 ? "Needs restocking" : "All healthy"} icon={<Icon.Report />} tone={data && data.lowStockCount > 0 ? "danger" : "success"} href="/reports/low-stock" />
+            <Hero label="Open Jobs" value={data?.openJobs ?? 0} hint="Material out with karigars" icon={<Icon.Job />} tone="info" href="/karigars" />
           </div>
 
           {/* What happened on a given day — the detail behind the KPIs above. */}
@@ -148,12 +149,13 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 function Hero({ label, value, hint, icon, tone, href }: { label: string; value: React.ReactNode; hint?: string; icon: React.ReactNode; tone: Tone; href: string }) {
   const c = TINT[tone];
   return (
-    <Link href={href} className="group relative overflow-hidden rounded-2xl border border-border p-4 shadow-xs transition-all hover:-translate-y-0.5 hover:shadow-[var(--shadow-md)]" style={{ background: c.bg }}>
-      <div className="flex items-start justify-between">
+    <Link href={href} className="soft-card group relative overflow-hidden p-4 transition-all hover:-translate-y-0.5 hover:border-border-strong hover:shadow-[var(--shadow-md)]">
+      <span className="absolute inset-x-0 top-0 h-[3px]" style={{ background: c.fg }} aria-hidden="true" />
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: c.fg }}>{label}</p>
-          <p className="mt-1 text-2xl font-bold text-ink">{value}</p>
-          {hint && <p className="mt-0.5 text-xs text-muted">{hint}</p>}
+          <p className="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted">{label}</p>
+          <p className="mt-2 text-[30px] font-bold leading-none tracking-tight text-ink">{value}</p>
+          {hint && <p className="mt-2 text-xs text-muted">{hint}</p>}
         </div>
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-white" style={{ background: c.fg }}>{icon}</span>
       </div>
