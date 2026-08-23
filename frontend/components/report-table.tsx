@@ -124,7 +124,7 @@ export function ReportTable<T>({
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="data-table">
+              <table className="data-table stacked">
                 <thead>
                   <tr>
                     {columns.map((c) => (
@@ -144,7 +144,7 @@ export function ReportTable<T>({
                   {paged.map((r, i) => (
                     <tr key={i}>
                       {columns.map((c) => (
-                        <td key={c.key} className={cn(c.num && "num", !c.render && !c.num && "text-muted")}>
+                        <td key={c.key} data-label={c.label} className={cn(c.num && "num", !c.render && !c.num && "text-muted")}>
                           {c.render ? c.render(r) : String((r as Record<string, unknown>)[c.key] ?? "—")}
                         </td>
                       ))}

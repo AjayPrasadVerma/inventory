@@ -207,9 +207,11 @@
     text-transform: uppercase;
     color: var(--muted);
   }
-  /* Numbers read left-aligned once they sit next to their own label. */
+  /* Column alignment meant for a table column reads as a misindented label once
+     the cell is a labelled row of its own. */
   .data-table.stacked tbody td.num,
-  .data-table.stacked tbody td.text-right {
+  .data-table.stacked tbody td.text-right,
+  .data-table.stacked tbody td.text-center {
     text-align: left;
   }
   /* A cell with no label spans the card and keeps its own alignment — the row
