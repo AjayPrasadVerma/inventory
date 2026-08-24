@@ -21,8 +21,8 @@ import { JobModal } from "@/components/job-modal";
 import { ReceiveGoodsModal } from "@/components/receive-goods-modal";
 
 interface KarigarLite { id: number; name: string; phone: string | null }
-interface Issued { name: string; color: string | null; unit: string; qty: string }
-interface Received { name: string; variant: string | null; qty: string }
+interface Issued { name: string; color: string | null; unit: string; qty: string; on: string }
+interface Received { name: string; variant: string | null; qty: string; on: string }
 interface PayLine { id: number; date: string; method: string | null; amount: number }
 interface Job {
   id: number;
@@ -210,75 +210,72 @@ export default function KarigarAccountPage() {
           {/* ── Job-wise khata: what went out (diya) against what came back (aaya) ── */}
           <div className="mt-2 overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-xs)]">
             <div className="max-h-[calc(100vh-300px)] min-h-[16rem] overflow-auto">
-              <table className="ledger-table w-full border-separate border-spacing-0 text-base md:min-w-[1040px]">
+              <table className="ledger-table w-full border-separate border-spacing-0 text-base md:min-w-[1100px]">
+                {/* One header row, not two: the colour now says which column is
+                    which, so a grouping strip above it is redundant. */}
                 <thead className="sticky top-0 z-10">
-                  <tr>
-                    <th colSpan={3} className="border-b border-border-strong bg-surface-2 px-4 py-2.5 text-left text-sm font-semibold text-[color:var(--accent)]">
-                      Material issued
-                    </th>
-                    <th className="border-b border-l-2 border-border-strong border-l-border-strong bg-surface-2 px-4 py-2.5 text-left text-sm font-semibold text-[color:var(--success)]">
-                      Goods received &amp; payment
-                    </th>
-                  </tr>
-                  <tr className="text-xs uppercase tracking-[0.09em] text-muted">
-                    <th className="w-28 whitespace-nowrap border-b border-border-strong bg-surface px-4 py-2 text-left font-semibold">Date</th>
-                    <th className="w-32 whitespace-nowrap border-b border-border-strong bg-surface px-4 py-2 text-left font-semibold">Job</th>
-                    <th className="border-b border-border-strong bg-surface px-4 py-2 text-left font-semibold">Issued — raw material</th>
-                    <th className="w-[40%] whitespace-nowrap border-b border-l-2 border-border-strong border-l-border-strong bg-surface px-4 py-2 text-left font-semibold">
-                      Received — goods · paid
-                    </th>
+                  <tr className="text-sm uppercase tracking-[0.07em]">
+                    <th className="w-24 whitespace-nowrap border-b border-border-strong bg-surface-2 px-3 py-3 text-left font-bold text-muted">Job</th>
+                    <th className="khata-head-in w-[30%] whitespace-nowrap border-b border-border-strong px-4 py-3 text-left font-bold">Item In</th>
+                    <th className="khata-head-raw w-[30%] whitespace-nowrap border-b border-l border-border-strong px-4 py-3 text-left font-bold">Raw Material</th>
+                    <th className="khata-head-pay w-[28%] whitespace-nowrap border-b border-l border-border-strong px-4 py-3 text-left font-bold">Payment</th>
                   </tr>
                 </thead>
 
                 <tbody>
                   {jobs.map((j) => {
                     const done = j.status === "closed";
-                    const cell = `border-b border-border-strong px-4 py-2.5 align-top max-md:border-b-0 ${done ? "bg-[color:var(--success-tint)]" : ""}`;
+                    // The row no longer turns green when the job closes — that would
+                    // swamp the column colours. The state is a badge instead.
+                    const cell = "border-b border-border-strong px-4 py-2.5 align-top max-md:border-b-0";
                     return (
                       <tr key={j.id}>
-                        <td data-label="Date" className={`${cell} whitespace-nowrap font-mono text-sm font-semibold text-muted`}>{formatDate(j.date)}</td>
-                        <td data-label="Job" className={cell}>
+                        <td data-label="Job" className={`${cell} px-3`}>
                           <span className="whitespace-nowrap font-mono text-[15px] font-semibold text-ink">#{j.id}</span>
-                          {j.note && <span className="mt-0.5 block max-w-[9rem] truncate text-[12px] text-muted" title={j.note}>{j.note}</span>}
-                          <span className="mt-1 flex gap-3 text-[13px]">
+                          <span className={`mt-1 block w-fit rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide ${done ? "bg-[color:var(--success-tint)] text-[color:var(--success)]" : "bg-[color:var(--warning-tint)] text-[color:var(--warning)]"}`}>
+                            {done ? "Complete" : "Open"}
+                          </span>
+                          {j.note && <span className="mt-0.5 block truncate text-[12px] text-muted" title={j.note}>{j.note}</span>}
+                          <span className="mt-1 flex gap-2 text-[12.5px]">
                             <button onClick={() => router.push(`/jobs/detail?j=${j.id}`)} className="cursor-pointer text-muted underline-offset-2 hover:text-ink hover:underline">Open</button>
                             {isOwner && (
                               <button onClick={() => setPendingDelete({ kind: "job", id: j.id, label: `Job #${j.id}` })} className="cursor-pointer text-muted underline-offset-2 hover:text-[color:var(--danger)] hover:underline">Delete</button>
                             )}
                           </span>
                         </td>
-                        <td data-label="Issued — raw material" className={`${cell} text-[15px] font-medium`}>
-                          {j.issued.length === 0 ? <span className="text-muted">—</span> : (
-                            <>
-                              {j.issued.length > 3 && (
-                                <span className="mb-1.5 inline-block rounded-full bg-surface-2 px-2 py-0.5 text-[11.5px] font-semibold uppercase tracking-wide text-muted">
-                                  {j.issued.length} items
-                                </span>
-                              )}
-                              <div className={j.issued.length > 3 ? "sm:columns-2 sm:gap-x-8" : undefined}>
+
+                        <td data-label="Item In" className={`${cell} khata-col-in`}>
+                          <ItemInCell received={j.received} returned={j.returned} done={done} onReceive={() => setReceiveJob(j.id)} />
+                        </td>
+                        <td data-label="Raw Material" className={`${cell} khata-col-raw border-l border-border-strong max-md:border-l-0`}>
+                          <div className="flex h-full w-full flex-col gap-2">
+                            <div className="flex items-baseline justify-between gap-3">
+                              <span className="text-[12.5px] font-semibold uppercase tracking-wide text-[color:var(--accent)]">Issued</span>
+                              <button onClick={() => router.push(`/jobs/detail?j=${j.id}&edit=1`)} className="cursor-pointer rounded-md bg-[color:var(--accent-tint)] px-2.5 py-1 text-[13px] font-medium text-[color:var(--accent)] transition-colors hover:bg-[color:var(--accent)] hover:text-white">Out</button>
+                            </div>
+                            {j.issued.length === 0 ? <span className="text-sm font-medium text-muted">Nothing issued</span> : (
+                              <div className="flex flex-col gap-0.5">
                                 {j.issued.map((it, k) => (
-                                  <span key={k} className="block break-inside-avoid">
-                                    {it.name}
-                                    {it.color ? <span className="text-muted"> ({it.color})</span> : null}
-                                    <span className="text-muted"> · {fmtQty(it.qty)} {it.unit}</span>
+                                  <span key={k} className="flex items-baseline gap-2 text-[15px] font-medium">
+                                    <span className="w-[5.5rem] shrink-0 font-mono text-[12.5px] font-semibold text-muted">
+                                      {k === 0 || j.issued[k - 1]!.on !== it.on ? formatDate(it.on) : ""}
+                                    </span>
+                                    <span>
+                                      {it.name}
+                                      {it.color ? <span className="text-muted"> ({it.color})</span> : null}
+                                      <span className="text-muted"> · {fmtQty(it.qty)} {it.unit}</span>
+                                    </span>
                                   </span>
                                 ))}
                               </div>
-                            </>
-                          )}
-                          {j.returned.length > 0 && (
-                            <span className="mt-1.5 block text-[13px] text-muted">
-                              Returned: {j.returned.map((r) => `${r.name}${r.color ? ` (${r.color})` : ""} · ${fmtQty(r.qty)} ${r.unit}`).join(", ")}
-                            </span>
-                          )}
+                            )}
+                          </div>
                         </td>
-                        <td data-label="Received — goods · paid" className={`border-b border-l-2 border-border-strong border-l-border-strong px-4 py-2.5 align-top max-md:border-b-0 max-md:border-l-0 max-md:border-t-2 ${done ? "bg-[color:var(--success-tint)]" : ""}`}>
-                          <ReturnBox
-                            done={done}
-                            received={j.received}
+
+                        <td data-label="Payment" className={`${cell} khata-col-pay border-l border-border-strong max-md:border-l-0`}>
+                          <PaymentCell
                             payments={j.payments}
                             paid={j.paid}
-                            onReceive={() => setReceiveJob(j.id)}
                             onPay={() => setPayModal({ jobId: j.id, ref: `Job #${j.id}` })}
                             onDeletePay={isOwner ? (p) => setPendingDelete({ kind: "payment", id: p.id, label: `${rupees(p.amount)} on ${formatDate(p.date)}` }) : undefined}
                           />
@@ -288,19 +285,24 @@ export default function KarigarAccountPage() {
                   })}
 
                   {/* Lump sums not tied to any job — still part of what the karigar was paid. */}
-                  {unlinked.map((u) => (
-                    <tr key={`u${u.id}`}>
-                      <td data-label="Date" className="border-b border-border-strong px-4 py-2.5 align-top font-mono text-sm font-semibold text-muted max-md:border-b-0">{formatDate(u.date)}</td>
-                      <td data-label="Job" className="border-b border-border-strong px-4 py-2.5 align-top font-mono text-[15px] text-muted max-md:border-b-0">—</td>
-                      <td data-label="Issued — raw material" className="border-b border-border-strong px-4 py-2.5 align-top text-[15px] font-medium text-muted max-md:border-b-0">
-                        Payment not tied to a job{u.note ? ` · ${u.note}` : ""}
-                      </td>
-                      <td data-label="Received — goods · paid" className="border-b border-l-2 border-border-strong border-l-border-strong px-4 py-2.5 align-top max-md:border-b-0 max-md:border-l-0 max-md:border-t-2">
-                        <PayRow line={{ id: u.id, date: u.date, method: u.method, amount: u.amount }}
-                          onDelete={isOwner ? () => setPendingDelete({ kind: "payment", id: u.id, label: `${rupees(u.amount)} on ${formatDate(u.date)}` }) : undefined} />
-                      </td>
-                    </tr>
-                  ))}
+                  {unlinked.map((u) => {
+                    const cell = "border-b border-border-strong px-4 py-2.5 align-top max-md:border-b-0";
+                    return (
+                      <tr key={`u${u.id}`}>
+                        <td data-label="Job" className={cell}>
+                          <span className="font-mono text-[15px] text-muted">—</span>
+                          <span className="mt-0.5 block whitespace-nowrap font-mono text-[13px] font-semibold text-muted">{formatDate(u.date)}</span>
+                          <span className="mt-1 block text-[12px] text-muted">Not tied to a job{u.note ? ` · ${u.note}` : ""}</span>
+                        </td>
+                        <td data-label="Item In" className={`${cell} khata-col-in text-[15px] text-muted`}>—</td>
+                        <td data-label="Raw Material" className={`${cell} khata-col-raw border-l border-border-strong text-[15px] text-muted max-md:border-l-0`}>—</td>
+                        <td data-label="Payment" className={`${cell} khata-col-pay border-l border-border-strong max-md:border-l-0`}>
+                          <PayRow line={{ id: u.id, date: u.date, method: u.method, amount: u.amount }}
+                            onDelete={isOwner ? () => setPendingDelete({ kind: "payment", id: u.id, label: `${rupees(u.amount)} on ${formatDate(u.date)}` }) : undefined} />
+                        </td>
+                      </tr>
+                    );
+                  })}
 
                   {jobs.length === 0 && unlinked.length === 0 && (
                     <tr><td colSpan={4} className="px-4 py-10 text-center text-muted">
@@ -311,10 +313,9 @@ export default function KarigarAccountPage() {
 
                 <tfoot>
                   <tr>
-                    <td colSpan={3} className="border-t border-border-strong bg-surface-2 px-4 py-2.5 text-[12.5px] font-semibold uppercase tracking-wide text-muted">
+                    <td colSpan={4} className="border-t border-border-strong bg-surface-2 px-4 py-2.5 text-[12.5px] font-semibold uppercase tracking-wide text-muted">
                       {jobs.length < khata.jobs.length ? `${jobs.length} of ${khata.jobs.length}` : khata.jobs.length} jobs · {payCount} payments
                     </td>
-                    <td className="border-l-2 border-t border-border-strong border-l-border-strong bg-surface-2 px-4 py-2.5 max-md:hidden" />
                   </tr>
                 </tfoot>
               </table>
@@ -379,51 +380,90 @@ export default function KarigarAccountPage() {
   );
 }
 
-/** What came back for one job: goods made, then what was paid for it. */
-function ReturnBox({
-  done, received, payments, paid, onReceive, onPay, onDeletePay,
+/** Everything that came back in for one job: the goods made, plus any raw
+ *  material returned unused. Both are inbound, so both belong in one column —
+ *  returned material used to sit as a footnote under the issued list. */
+function ItemInCell({
+  received, returned, done, onReceive,
 }: {
-  done: boolean;
   received: Received[];
+  returned: Issued[];
+  done: boolean;
+  onReceive: () => void;
+}) {
+  const nothing = received.length === 0 && returned.length === 0;
+  return (
+    <div className="flex h-full w-full flex-col gap-2">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[12.5px] font-semibold uppercase tracking-wide text-[color:var(--success)]">Goods made</span>
+        <span className="flex items-center gap-2">
+          {done && <span className="text-[13px] font-bold uppercase tracking-wide text-[color:var(--success)]">Complete</span>}
+          <button onClick={onReceive} className="cursor-pointer rounded-md bg-[color:var(--success-tint)] px-2.5 py-1 text-[13px] font-medium text-[color:var(--success)] transition-colors hover:bg-[color:var(--success)] hover:text-white">Receive</button>
+        </span>
+      </div>
+
+      {nothing ? (
+        <span className="text-sm font-medium text-muted">Nothing received yet</span>
+      ) : (
+        <div className="flex flex-col gap-0.5">
+          {received.map((r, i) => (
+            <span key={i} className="flex items-baseline gap-2 text-[15px] font-medium">
+              <span className="w-[5.5rem] shrink-0 font-mono text-[12.5px] font-semibold text-muted">
+                {i === 0 || received[i - 1]!.on !== r.on ? formatDate(r.on) : ""}
+              </span>
+              <span>
+                {r.name}
+                {r.variant ? <span className="text-muted"> ({r.variant})</span> : null}
+                <span className="text-muted"> · {fmtQty(r.qty)} pcs</span>
+              </span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {returned.length > 0 && (
+        <div className="flex flex-col gap-0.5 border-t border-border pt-1.5">
+          <span className="text-[12.5px] font-semibold uppercase tracking-wide text-muted">Material returned</span>
+          {returned.map((r, i) => (
+            <span key={i} className="flex items-baseline gap-2 text-[15px] font-medium">
+              <span className="w-[5.5rem] shrink-0 font-mono text-[12.5px] font-semibold text-muted">
+                {i === 0 || returned[i - 1]!.on !== r.on ? formatDate(r.on) : ""}
+              </span>
+              <span>
+                {r.name}
+                {r.color ? <span className="text-muted"> ({r.color})</span> : null}
+                <span className="text-muted"> · {fmtQty(r.qty)} {r.unit}</span>
+              </span>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** What the karigar was paid for one job. */
+function PaymentCell({
+  payments, paid, onPay, onDeletePay,
+}: {
   payments: PayLine[];
   paid: number;
-  onReceive: () => void;
   onPay: () => void;
   onDeletePay?: (p: PayLine) => void;
 }) {
   return (
     <div className="flex h-full w-full flex-col gap-2">
       <div className="flex items-baseline justify-between gap-3">
-        <span className="text-[12.5px] font-semibold uppercase tracking-wide text-muted">Goods made</span>
-        <span className="flex items-center gap-2">
-          {done && <span className="text-[13px] font-bold uppercase tracking-wide text-[color:var(--success)]">Complete</span>}
-          <button onClick={onReceive} className="cursor-pointer rounded-md bg-primary-tint px-2.5 py-1 text-[13px] font-medium text-primary transition-colors hover:bg-primary hover:text-primary-fg">Receive</button>
-        </span>
-      </div>
-
-      {received.length === 0 ? (
-        <span className="text-sm font-medium text-muted">Nothing received yet</span>
-      ) : (
-        <div className="flex flex-col gap-0.5">
-          {received.map((r, i) => (
-            <span key={i} className="text-[15px] font-medium">
-              {r.name}
-              {r.variant ? <span className="text-muted"> ({r.variant})</span> : null}
-              <span className="text-muted"> · {fmtQty(r.qty)} pcs</span>
-            </span>
-          ))}
-        </div>
-      )}
-
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="text-[12.5px] font-semibold uppercase tracking-wide text-muted">Paid</span>
+        <span className="text-[12.5px] font-semibold uppercase tracking-wide text-[color:var(--primary)]">Paid</span>
         <span className="flex items-baseline gap-2">
-          <span className="font-mono text-base font-bold tabular-nums text-[color:var(--success)]">{rupees(paid)}</span>
-          <button onClick={onPay} className="cursor-pointer rounded-md bg-[color:var(--success-tint)] px-2.5 py-1 text-[13px] font-medium text-[color:var(--success)] transition-colors hover:bg-[color:var(--success)] hover:text-white">Pay</button>
+          <span className="font-mono text-base font-bold tabular-nums text-ink">{rupees(paid)}</span>
+          <button onClick={onPay} className="cursor-pointer rounded-md bg-primary-tint px-2.5 py-1 text-[13px] font-medium text-primary transition-colors hover:bg-primary hover:text-primary-fg">Pay</button>
         </span>
       </div>
 
-      {payments.length > 0 && (
+      {payments.length === 0 ? (
+        <span className="text-sm font-medium text-muted">No payment yet</span>
+      ) : (
         <div className="flex flex-col gap-0.5">
           {payments.map((p) => (
             <PayRow key={p.id} line={p} onDelete={onDeletePay ? () => onDeletePay(p) : undefined} />

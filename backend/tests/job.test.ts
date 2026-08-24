@@ -54,6 +54,29 @@ describe('issue and receive', () => {
     expect(Number(j.received[0]!.qty)).toBe(8);
     expect(Number(j.returned[0]!.qty)).toBe(3);
   });
+
+  it('carries the day each line moved, not the job date', async () => {
+    // Goods trickle back over several days. The khata used to expose only the
+    // job's own date, so the account could not say when anything actually
+    // arrived — every line inherited the day the job was opened.
+    await stockUp(f);
+    const job = await jobsRepo.create({
+      karigar_id: f.karigarId,
+      job_date: '2026-06-01',
+      issues: [issue(f, 20)],
+    } as never);
+    await jobsRepo.addReceipt(job.id, [receipt(f, 5)], [], '2026-06-20');
+    await jobsRepo.addReceipt(job.id, [receipt(f, 3)], [{ ...issue(f, 2) }], '2026-07-04');
+
+    const k = (await karigarsRepo.khata(f.karigarId))!;
+    const j = k.jobs.find((x) => x.id === job.id)!;
+
+    expect(j.date.slice(0, 10)).toBe('2026-06-01');
+    expect(j.issued[0]!.on.slice(0, 10)).toBe('2026-06-01');
+    // The two receipts keep their own days rather than collapsing onto the job.
+    expect(j.received.map((r) => r.on.slice(0, 10))).toEqual(['2026-06-20', '2026-07-04']);
+    expect(j.returned[0]!.on.slice(0, 10)).toBe('2026-07-04');
+  });
 });
 
 describe('edit', () => {

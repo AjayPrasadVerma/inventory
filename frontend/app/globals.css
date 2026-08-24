@@ -25,6 +25,12 @@
   --danger-tint: #f7e1dc;
   --info: #1d7488;
   --info-tint: #e0eef1;
+  --khata-in: #d6ecdf;
+  --khata-raw: #f9ebc4;
+  --khata-pay: #dbe3fa;
+  --khata-in-head: #bfe0cc;
+  --khata-raw-head: #f2dfa4;
+  --khata-pay-head: #c4d0f5;
   --ring: #2e3577;
   --sidebar: #ffffff;
   --nav: #1b204c;
@@ -55,6 +61,12 @@
   --danger-tint: #2e1815;
   --info: #4fb0c6;
   --info-tint: #12262b;
+  --khata-in: #17301f;
+  --khata-raw: #322813;
+  --khata-pay: #1e2547;
+  --khata-in-head: #1d4230;
+  --khata-raw-head: #4a3c1c;
+  --khata-pay-head: #2b3468;
   --ring: #7c86d6;
   --sidebar: #14151f;
   --nav: #0c0d14;
@@ -278,6 +290,23 @@
     color: var(--muted);
   }
 }
+
+/* ---- Khata column colour-coding ----
+   The owner reads this table across the room, so each column carries its own
+   hue rather than relying on a heading: green is what came back, gold is what
+   went out, indigo is money. The header takes the full tint and the cells a
+   diluted one, so the column reads as a continuous band down the page without
+   the body shouting over the content sitting on it.
+
+   Built from the existing tint tokens, so both themes are already handled — the
+   dark palette redefines the same variables. */
+.khata-head-in   { background: var(--khata-in-head);  color: var(--success); }
+.khata-head-raw  { background: var(--khata-raw-head); color: var(--accent); }
+.khata-head-pay  { background: var(--khata-pay-head); color: var(--primary); }
+
+.khata-col-in    { background: var(--khata-in); }
+.khata-col-raw   { background: var(--khata-raw); }
+.khata-col-pay   { background: var(--khata-pay); }
 
 /* The brand mark reversed out for the dark top rail. Works because the source
    PNG is one flat colour: brightness(0) crushes it to black, invert lifts it to
