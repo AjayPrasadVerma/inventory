@@ -250,24 +250,22 @@ export default function KarigarAccountPage() {
                         <td data-label="Raw Material" className={`${cell} khata-col-raw border-l border-border-strong max-md:border-l-0`}>
                           <div className="flex h-full w-full flex-col gap-2">
                             <div className="flex items-baseline justify-between gap-3">
-                              <span className="text-[12.5px] font-semibold uppercase tracking-wide text-[color:var(--accent)]">Issued</span>
+                              <span className="text-[12.5px] font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                                Issued{j.issued.length > 0 ? ` · ${j.issued.length}` : ""}
+                              </span>
                               <button onClick={() => router.push(`/jobs/detail?j=${j.id}&edit=1`)} className="cursor-pointer rounded-md bg-[color:var(--accent-tint)] px-2.5 py-1 text-[13px] font-medium text-[color:var(--accent)] transition-colors hover:bg-[color:var(--accent)] hover:text-white">Out</button>
                             </div>
                             {j.issued.length === 0 ? <span className="text-sm font-medium text-muted">Nothing issued</span> : (
-                              <div className="flex flex-col gap-0.5">
-                                {j.issued.map((it, k) => (
-                                  <span key={k} className="flex items-baseline gap-2 text-[15px] font-medium">
-                                    <span className="w-[5.5rem] shrink-0 font-mono text-[12.5px] font-semibold text-muted">
-                                      {k === 0 || j.issued[k - 1]!.on !== it.on ? formatDate(it.on) : ""}
-                                    </span>
-                                    <span>
-                                      {it.name}
-                                      {it.color ? <span className="text-muted"> ({it.color})</span> : null}
-                                      <span className="text-muted"> · {fmtQty(it.qty)} {it.unit}</span>
-                                    </span>
-                                  </span>
-                                ))}
-                              </div>
+                              <LineList
+                                lines={j.issued}
+                                render={(it) => (
+                                  <>
+                                    {it.name}
+                                    {it.color ? <span className="text-muted"> ({it.color})</span> : null}
+                                    <span className="text-muted"> · {fmtQty(it.qty)} {it.unit}</span>
+                                  </>
+                                )}
+                              />
                             )}
                           </div>
                         </td>
@@ -380,6 +378,45 @@ export default function KarigarAccountPage() {
   );
 }
 
+/** A dated list of movement lines, collapsed past a handful.
+ *
+ *  A single receipt can run to thirty or forty lines. Rendering them all makes
+ *  one job taller than the viewport and buries every other job, so the list caps
+ *  itself and says how many more there are. The date prints only when it changes
+ *  from the line above: a job that moved in one go stays quiet, and one that came
+ *  back across several days shows exactly where the breaks are. */
+function LineList<T extends { on: string }>({
+  lines, render,
+}: {
+  lines: T[];
+  render: (line: T) => React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const LIMIT = 6;
+  const shown = open ? lines : lines.slice(0, LIMIT);
+  const hidden = lines.length - shown.length;
+  return (
+    <div className="flex flex-col gap-0.5">
+      {shown.map((l, i) => (
+        <span key={i} className="flex items-baseline gap-2 text-[15px] font-medium">
+          <span className="w-[5.5rem] shrink-0 font-mono text-[12.5px] font-semibold text-muted">
+            {i === 0 || shown[i - 1]!.on !== l.on ? formatDate(l.on) : ""}
+          </span>
+          <span className="min-w-0">{render(l)}</span>
+        </span>
+      ))}
+      {(hidden > 0 || open) && (
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="mt-0.5 w-fit cursor-pointer text-[13px] font-semibold text-muted underline-offset-2 hover:text-ink hover:underline"
+        >
+          {open ? "Show less" : `+${hidden} more`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** Everything that came back in for one job: the goods made, plus any raw
  *  material returned unused. Both are inbound, so both belong in one column —
  *  returned material used to sit as a footnote under the issued list. */
@@ -395,7 +432,9 @@ function ItemInCell({
   return (
     <div className="flex h-full w-full flex-col gap-2">
       <div className="flex items-baseline justify-between gap-3">
-        <span className="text-[12.5px] font-semibold uppercase tracking-wide text-[color:var(--success)]">Goods made</span>
+        <span className="text-[12.5px] font-semibold uppercase tracking-wide text-[color:var(--success)]">
+          Goods made{received.length > 0 ? ` · ${received.length}` : ""}
+        </span>
         <span className="flex items-center gap-2">
           {done && <span className="text-[13px] font-bold uppercase tracking-wide text-[color:var(--success)]">Complete</span>}
           <button onClick={onReceive} className="cursor-pointer rounded-md bg-[color:var(--success-tint)] px-2.5 py-1 text-[13px] font-medium text-[color:var(--success)] transition-colors hover:bg-[color:var(--success)] hover:text-white">Receive</button>
@@ -405,37 +444,33 @@ function ItemInCell({
       {nothing ? (
         <span className="text-sm font-medium text-muted">Nothing received yet</span>
       ) : (
-        <div className="flex flex-col gap-0.5">
-          {received.map((r, i) => (
-            <span key={i} className="flex items-baseline gap-2 text-[15px] font-medium">
-              <span className="w-[5.5rem] shrink-0 font-mono text-[12.5px] font-semibold text-muted">
-                {i === 0 || received[i - 1]!.on !== r.on ? formatDate(r.on) : ""}
-              </span>
-              <span>
-                {r.name}
-                {r.variant ? <span className="text-muted"> ({r.variant})</span> : null}
-                <span className="text-muted"> · {fmtQty(r.qty)} pcs</span>
-              </span>
-            </span>
-          ))}
-        </div>
+        <LineList
+          lines={received}
+          render={(r) => (
+            <>
+              {r.name}
+              {r.variant ? <span className="text-muted"> ({r.variant})</span> : null}
+              <span className="text-muted"> · {fmtQty(r.qty)} pcs</span>
+            </>
+          )}
+        />
       )}
 
       {returned.length > 0 && (
         <div className="flex flex-col gap-0.5 border-t border-border pt-1.5">
-          <span className="text-[12.5px] font-semibold uppercase tracking-wide text-muted">Material returned</span>
-          {returned.map((r, i) => (
-            <span key={i} className="flex items-baseline gap-2 text-[15px] font-medium">
-              <span className="w-[5.5rem] shrink-0 font-mono text-[12.5px] font-semibold text-muted">
-                {i === 0 || returned[i - 1]!.on !== r.on ? formatDate(r.on) : ""}
-              </span>
-              <span>
+          <span className="text-[12.5px] font-semibold uppercase tracking-wide text-muted">
+            Material returned · {returned.length}
+          </span>
+          <LineList
+            lines={returned}
+            render={(r) => (
+              <>
                 {r.name}
                 {r.color ? <span className="text-muted"> ({r.color})</span> : null}
                 <span className="text-muted"> · {fmtQty(r.qty)} {r.unit}</span>
-              </span>
-            </span>
-          ))}
+              </>
+            )}
+          />
         </div>
       )}
     </div>
