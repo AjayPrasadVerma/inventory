@@ -210,15 +210,15 @@ export default function KarigarAccountPage() {
           {/* ── Job-wise khata: what went out (diya) against what came back (aaya) ── */}
           <div className="mt-2 overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-xs)]">
             <div className="max-h-[calc(100vh-300px)] min-h-[16rem] overflow-auto">
-              <table className="ledger-table w-full border-separate border-spacing-0 text-base md:min-w-[1100px]">
+              <table className="ledger-table w-full border-separate border-spacing-0 text-base md:min-w-[1180px]">
                 {/* One header row, not two: the colour now says which column is
                     which, so a grouping strip above it is redundant. */}
                 <thead className="sticky top-0 z-10">
                   <tr className="text-sm uppercase tracking-[0.07em]">
                     <th className="w-24 whitespace-nowrap border-b border-border-strong bg-surface-2 px-3 py-3 text-left font-bold text-muted">Job</th>
-                    <th className="khata-head-in w-[30%] whitespace-nowrap border-b border-border-strong px-4 py-3 text-left font-bold">Item In</th>
-                    <th className="khata-head-raw w-[30%] whitespace-nowrap border-b border-l border-border-strong px-4 py-3 text-left font-bold">Raw Material</th>
-                    <th className="khata-head-pay w-[28%] whitespace-nowrap border-b border-l border-border-strong px-4 py-3 text-left font-bold">Payment</th>
+                    <th className="khata-head-in w-[37%] whitespace-nowrap border-b border-border-strong px-3 py-3 text-left font-bold">Item In</th>
+                    <th className="khata-head-raw w-[37%] whitespace-nowrap border-b border-l border-border-strong px-3 py-3 text-left font-bold">Raw Material</th>
+                    <th className="khata-head-pay w-[15rem] whitespace-nowrap border-b border-l border-border-strong px-3 py-3 text-left font-bold">Payment</th>
                   </tr>
                 </thead>
 
@@ -227,7 +227,7 @@ export default function KarigarAccountPage() {
                     const done = j.status === "closed";
                     // The row no longer turns green when the job closes — that would
                     // swamp the column colours. The state is a badge instead.
-                    const cell = "border-b border-border-strong px-4 py-2.5 align-top max-md:border-b-0";
+                    const cell = "border-b border-border-strong px-3 py-2.5 align-top max-md:border-b-0";
                     return (
                       <tr key={j.id}>
                         <td data-label="Job" className={`${cell} px-3`}>
@@ -235,7 +235,7 @@ export default function KarigarAccountPage() {
                           <span className={`mt-1 block w-fit rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide ${done ? "bg-[color:var(--success-tint)] text-[color:var(--success)]" : "bg-[color:var(--warning-tint)] text-[color:var(--warning)]"}`}>
                             {done ? "Complete" : "Open"}
                           </span>
-                          {j.note && <span className="mt-0.5 block truncate text-[12px] text-muted" title={j.note}>{j.note}</span>}
+                          {j.note && <span className="mt-0.5 block max-w-[5.5rem] truncate text-[12px] text-muted" title={j.note}>{j.note}</span>}
                           <span className="mt-1 flex gap-2 text-[12.5px]">
                             <button onClick={() => router.push(`/jobs/detail?j=${j.id}`)} className="cursor-pointer text-muted underline-offset-2 hover:text-ink hover:underline">Open</button>
                             {isOwner && (
@@ -284,7 +284,7 @@ export default function KarigarAccountPage() {
 
                   {/* Lump sums not tied to any job — still part of what the karigar was paid. */}
                   {unlinked.map((u) => {
-                    const cell = "border-b border-border-strong px-4 py-2.5 align-top max-md:border-b-0";
+                    const cell = "border-b border-border-strong px-3 py-2.5 align-top max-md:border-b-0";
                     return (
                       <tr key={`u${u.id}`}>
                         <td data-label="Job" className={cell}>
@@ -303,7 +303,7 @@ export default function KarigarAccountPage() {
                   })}
 
                   {jobs.length === 0 && unlinked.length === 0 && (
-                    <tr><td colSpan={4} className="px-4 py-10 text-center text-muted">
+                    <tr><td colSpan={4} className="px-3 py-10 text-center text-muted">
                       No jobs{hasFilter ? " match these filters" : " yet"}.
                     </td></tr>
                   )}
@@ -311,7 +311,7 @@ export default function KarigarAccountPage() {
 
                 <tfoot>
                   <tr>
-                    <td colSpan={4} className="border-t border-border-strong bg-surface-2 px-4 py-2.5 text-[12.5px] font-semibold uppercase tracking-wide text-muted">
+                    <td colSpan={4} className="border-t border-border-strong bg-surface-2 px-3 py-2.5 text-[12.5px] font-semibold uppercase tracking-wide text-muted">
                       {jobs.length < khata.jobs.length ? `${jobs.length} of ${khata.jobs.length}` : khata.jobs.length} jobs · {payCount} payments
                     </td>
                   </tr>
