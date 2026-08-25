@@ -351,7 +351,7 @@ export const karigarEntriesRepo = {
     const names = (await query<{ id: number; name: string }>(
       `SELECT id, name FROM ${table}
        WHERE is_active AND name ILIKE '%' || $1 || '%' ESCAPE '\\'
-       ORDER BY lower(name) LIMIT 20`,
+       ORDER BY lower(name) LIMIT 500`,
       [term],
     )).rows;
     if (names.length === 0) return [];
