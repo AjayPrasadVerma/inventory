@@ -24,7 +24,8 @@ interface EntryLine { id: number; name: string; size: string | null; design: str
 interface PayLine { id: number; date: string; method: string | null; amount: number }
 interface Entry {
   id: number;
-  direction: Direction;
+  /** null for a payment that belongs to no movement of its own. */
+  direction: Direction | null;
   date: string;
   remark: string | null;
   lines: EntryLine[];
@@ -133,8 +134,21 @@ export default function KarigarAccountPage() {
         .join(" ").toLowerCase().includes(term));
   }, [log, term]);
 
+  // Each column is its own stack, oldest first so the newest sits at its bottom.
+  // The API returns newest first because that is what a log wants; the columns
+  // read the other way because the owner fills them downward.
+  const oldestFirst = useMemo(() => [...entries].reverse(), [entries]);
+  const ins = useMemo(() => oldestFirst.filter((e) => e.direction === "in"), [oldestFirst]);
+  const outs = useMemo(() => oldestFirst.filter((e) => e.direction === "out"), [oldestFirst]);
+  // Money is its own stack: a payment attached to a movement and a lump sum with
+  // no movement both belong here, and neither should appear twice.
+  const money = useMemo(
+    () => oldestFirst.flatMap((e) => e.payments),
+    [oldestFirst],
+  );
+
   const hasFilter = !!from || !!to || !!search;
-  const paidShown = entries.reduce((n, e) => n + e.paid, 0);
+  const paidShown = money.reduce((n, p) => n + p.amount, 0);
 
   async function confirmDelete() {
     if (!pendingDelete || !karigarId) return;
@@ -196,135 +210,69 @@ export default function KarigarAccountPage() {
             <Tile label="Total paid" value={rupees(log.totals.paid)} tone="pay" />
           </div>
 
-          <div className="mt-2 overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-xs)]">
-            <div className="overflow-auto">
-              <table className="ledger-table w-full border-separate border-spacing-0 text-base md:min-w-[1130px]">
-                {/* The actions live here, not on each row: one In, one Out, one
-                    Pay, each sitting on the colour it belongs to. */}
-                <thead className="sticky top-0 z-10">
-                  <tr className="text-sm uppercase tracking-[0.07em]">
-                    <th className="w-28 whitespace-nowrap border-b border-border-strong bg-surface-2 px-3 py-3 text-left font-bold text-muted">
-                      Date
-                    </th>
-                    <th className="khata-head-in w-[33%] border-b border-border-strong px-3 py-2.5 text-left font-bold">
-                      <span className="flex items-center justify-between gap-3">
-                        Item In
-                        <button
-                          onClick={() => setEntryForm("in")}
-                          aria-label="Record goods coming in"
-                          className="cursor-pointer rounded-md bg-[color:var(--success)] px-3 py-1 text-[13px] font-semibold normal-case tracking-normal text-white transition-opacity hover:opacity-85"
-                        >
-                          + In
-                        </button>
-                      </span>
-                    </th>
-                    <th className="khata-head-raw w-[33%] border-b border-l border-border-strong px-3 py-2.5 text-left font-bold">
-                      <span className="flex items-center justify-between gap-3">
-                        Raw Material
-                        <button
-                          onClick={() => setEntryForm("out")}
-                          aria-label="Issue material out"
-                          className="cursor-pointer rounded-md bg-[color:var(--accent)] px-3 py-1 text-[13px] font-semibold normal-case tracking-normal text-white transition-opacity hover:opacity-85"
-                        >
-                          + Out
-                        </button>
-                      </span>
-                    </th>
-                    <th className="khata-head-pay w-[13rem] border-b border-l border-border-strong px-3 py-2.5 text-left font-bold">
-                      <span className="flex items-center justify-between gap-3">
-                        Payment
-                        <button
-                          onClick={() => setPayOpen(true)}
-                          aria-label="Record a payment"
-                          className="cursor-pointer rounded-md bg-primary px-3 py-1 text-[13px] font-semibold normal-case tracking-normal text-primary-fg transition-opacity hover:opacity-85"
-                        >
-                          + Pay
-                        </button>
-                      </span>
-                    </th>
-                  </tr>
-                </thead>
+          {/* Three independent stacks, not one row per entry. Pairing every
+              movement into a shared row left half of the table showing a dash,
+              which the owner reads as wasted space rather than as information.
+              Each column now packs its own entries oldest-first, so the newest
+              sits at the bottom of its own column and the two sides grow at
+              whatever rate the work actually happened. */}
+          <div className="mt-2 grid gap-2 lg:grid-cols-[1fr_1fr_15rem]">
+            <Stack
+              title="Item In"
+              headClass="khata-head-in"
+              bodyClass="khata-col-in"
+              action={
+                <StackButton onClick={() => setEntryForm("in")} label="+ In" aria="Record goods coming in" className="bg-[color:var(--success)] text-white" />
+              }
+              empty="Nothing received in this range."
+            >
+              {ins.map((e) => (
+                <EntryBlock key={e.id} entry={e} onDelete={isOwner ? () => setPendingDelete({ id: e.id, label: `In on ${formatDate(e.date)}` }) : undefined} />
+              ))}
+            </Stack>
 
-                <tbody>
-                  {entries.map((e) => {
-                    const isIn = e.direction === "in";
-                    const cell = "border-b border-border-strong px-3 py-2.5 align-top max-md:border-b-0";
-                    return (
-                      <tr key={e.id}>
-                        <td data-label="Date" className={cell}>
-                          <span className="block whitespace-nowrap font-mono text-[14px] font-semibold text-ink">
-                            {formatDate(e.date)}
-                          </span>
-                          <span
-                            className={`mt-1 block w-fit rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide ${
-                              isIn
-                                ? "bg-[color:var(--success-tint)] text-[color:var(--success)]"
-                                : "bg-[color:var(--accent-tint)] text-[color:var(--accent)]"
-                            }`}
-                          >
-                            {isIn ? "In" : "Out"}
-                          </span>
-                          {e.remark && (
-                            <span className="mt-0.5 block max-w-[6.5rem] truncate text-[12px] text-muted" title={e.remark}>
-                              {e.remark}
-                            </span>
-                          )}
-                          {isOwner && (
-                            <button
-                              onClick={() => setPendingDelete({ id: e.id, label: `${isIn ? "In" : "Out"} on ${formatDate(e.date)}` })}
-                              className="mt-1 cursor-pointer text-[12.5px] text-muted underline-offset-2 hover:text-[color:var(--danger)] hover:underline"
-                            >
-                              Delete
-                            </button>
-                          )}
-                        </td>
+            <Stack
+              title="Raw Material"
+              headClass="khata-head-raw"
+              bodyClass="khata-col-raw"
+              action={
+                <StackButton onClick={() => setEntryForm("out")} label="+ Out" aria="Issue material out" className="bg-[color:var(--accent)] text-white" />
+              }
+              empty="Nothing issued in this range."
+            >
+              {outs.map((e) => (
+                <EntryBlock key={e.id} entry={e} onDelete={isOwner ? () => setPendingDelete({ id: e.id, label: `Out on ${formatDate(e.date)}` }) : undefined} />
+              ))}
+            </Stack>
 
-                        {/* An entry only ever fills the column for its own
-                            direction. The blank side is what makes the sequence
-                            readable down the page. */}
-                        <td data-label="Item In" className={`${cell} khata-col-in`}>
-                          {isIn ? <LineList lines={e.lines} /> : <span className="text-sm text-muted">—</span>}
-                        </td>
-                        <td data-label="Raw Material" className={`${cell} khata-col-raw border-l border-border-strong max-md:border-l-0`}>
-                          {isIn ? <span className="text-sm text-muted">—</span> : <LineList lines={e.lines} />}
-                        </td>
-                        <td data-label="Payment" className={`${cell} khata-col-pay border-l border-border-strong max-md:border-l-0`}>
-                          {e.payments.length === 0 ? (
-                            <span className="text-sm text-muted">—</span>
-                          ) : (
-                            <div className="flex flex-col gap-0.5">
-                              <span className="font-mono text-base font-bold tabular-nums text-ink">{rupees(e.paid)}</span>
-                              {e.payments.map((p) => (
-                                <span key={p.id} className="text-[13.5px] text-muted">
-                                  {p.method || "—"}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-
-                  {entries.length === 0 && (
-                    <tr><td colSpan={4} className="px-3 py-10 text-center text-muted">
-                      Nothing recorded{hasFilter ? " in this range" : " yet"}.
-                    </td></tr>
-                  )}
-                </tbody>
-
-                <tfoot>
-                  <tr>
-                    <td colSpan={4} className="border-t border-border-strong bg-surface-2 px-3 py-2.5 text-[12.5px] font-semibold uppercase tracking-wide text-muted">
-                      {entries.length < (log.entries.length)
-                        ? `${entries.length} of ${log.entries.length}`
-                        : entries.length} entries · {rupees(paidShown)} paid
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+            {/* Every rupee paid in range, however it was linked. A payment made
+                against one of the old jobs carries a job_id and a lump sum
+                carries nothing, so following only the entry link showed a total
+                of zero while the money sat in the table. */}
+            <Stack
+              title="Payment"
+              headClass="khata-head-pay"
+              bodyClass="khata-col-pay"
+              action={
+                <StackButton onClick={() => setPayOpen(true)} label="+ Pay" aria="Record a payment" className="bg-primary text-primary-fg" />
+              }
+              empty="No payment in this range."
+            >
+              {money.map((p) => (
+                <div key={p.id} className="border-b border-border-strong px-3 py-2.5 last:border-b-0">
+                  <span className="flex items-baseline justify-between gap-2">
+                    <span className="font-mono text-[13px] font-semibold text-muted">{formatDate(p.date)}</span>
+                    <span className="font-mono text-[15px] font-bold tabular-nums text-ink">{rupees(p.amount)}</span>
+                  </span>
+                  <span className="mt-0.5 block text-[13px] text-muted">{p.method || "—"}</span>
+                </div>
+              ))}
+            </Stack>
           </div>
+
+          <p className="mt-2 text-[12.5px] font-semibold uppercase tracking-wide text-muted">
+            {ins.length} in · {outs.length} out · {rupees(paidShown)} paid
+          </p>
         </>
       ) : null}
 
@@ -370,6 +318,71 @@ export default function KarigarAccountPage() {
         onConfirm={confirmDelete}
         onClose={() => setPendingDelete(null)}
       />
+    </div>
+  );
+}
+
+/** One column of the khata: a coloured header carrying its own action, and a
+ *  stack of blocks beneath it. */
+function Stack({
+  title, headClass, bodyClass, action, empty, children,
+}: {
+  title: string;
+  headClass: string;
+  bodyClass: string;
+  action: React.ReactNode;
+  empty: string;
+  children: React.ReactNode;
+}) {
+  const isEmpty = Array.isArray(children) ? children.length === 0 : !children;
+  return (
+    <div className="overflow-hidden rounded-xl border border-border-strong">
+      <div className={`${headClass} flex items-center justify-between gap-3 border-b border-border-strong px-3 py-2.5`}>
+        <span className="text-sm font-bold uppercase tracking-[0.07em]">{title}</span>
+        {action}
+      </div>
+      <div className={`${bodyClass} min-h-[6rem]`}>
+        {isEmpty ? <p className="px-3 py-8 text-center text-sm text-muted">{empty}</p> : children}
+      </div>
+    </div>
+  );
+}
+
+function StackButton({
+  onClick, label, aria, className,
+}: { onClick: () => void; label: string; aria: string; className: string }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={aria}
+      className={`cursor-pointer rounded-md px-3 py-1 text-[13px] font-semibold transition-opacity hover:opacity-85 ${className}`}
+    >
+      {label}
+    </button>
+  );
+}
+
+/** One movement in a column: when, why, and what moved. */
+function EntryBlock({ entry, onDelete }: { entry: Entry; onDelete?: () => void }) {
+  return (
+    <div className="border-b border-border-strong px-3 py-2.5 last:border-b-0">
+      <span className="flex items-baseline justify-between gap-2">
+        <span className="font-mono text-[13px] font-semibold text-muted">{formatDate(entry.date)}</span>
+        {onDelete && (
+          <button
+            onClick={onDelete}
+            className="cursor-pointer text-[12.5px] text-muted underline-offset-2 hover:text-[color:var(--danger)] hover:underline"
+          >
+            Delete
+          </button>
+        )}
+      </span>
+      {entry.remark && (
+        <span className="mt-0.5 block truncate text-[12.5px] text-muted" title={entry.remark}>{entry.remark}</span>
+      )}
+      <div className="mt-1">
+        <LineList lines={entry.lines} />
+      </div>
     </div>
   );
 }

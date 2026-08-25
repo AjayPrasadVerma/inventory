@@ -52,7 +52,8 @@ export interface EntryLine {
 
 export interface Entry {
   id: number;
-  direction: Direction;
+  /** null for a payment that belongs to no movement — see log(). */
+  direction: Direction | null;
   date: string;
   remark: string | null;
   lines: EntryLine[];
@@ -235,12 +236,8 @@ export const karigarEntriesRepo = {
       params,
     )).rows;
 
-    if (entries.length === 0) {
-      return { entries: [], totals: { in: 0, out: 0, paid: 0 } };
-    }
-
     const ids = entries.map((e) => e.id);
-    const lines = (await query<{
+    const lines = ids.length === 0 ? [] : (await query<{
       entry_id: number; id: number; name: string; size: string | null; design: string | null; qty: string;
     }>(
       `SELECT l.entry_id, l.id, COALESCE(i.name, p.name) AS name, l.size, l.design, l.qty
@@ -252,14 +249,26 @@ export const karigarEntriesRepo = {
       [ids],
     )).rows;
 
+    // Every rupee paid to this karigar in range, however it was linked. Payments
+    // made against the old jobs carry a job_id and lump sums carry nothing, so a
+    // query that only followed karigar_entry_id reported a total of zero while the
+    // money sat in the table. Anything not attached to an entry is surfaced as its
+    // own row below rather than being dropped.
+    const payWhere: string[] = [
+      `party_type = 'karigar'`, `party_id = $1`, `direction = 'paid'`,
+    ];
+    const payParams: unknown[] = [karigarId];
+    if (opts.from) { payParams.push(opts.from); payWhere.push(`pay_date >= $${payParams.length}`); }
+    if (opts.to) { payParams.push(opts.to); payWhere.push(`pay_date <= $${payParams.length}`); }
+
     const pays = (await query<{
-      karigar_entry_id: number; id: number; pay_date: string; method: string | null; amount: string;
+      karigar_entry_id: number | null; id: number; pay_date: string; method: string | null;
+      amount: string; ref_note: string | null;
     }>(
-      `SELECT karigar_entry_id, id, pay_date, method, amount FROM payments
-       WHERE party_type = 'karigar' AND party_id = $1 AND direction = 'paid'
-         AND karigar_entry_id = ANY($2::int[])
+      `SELECT karigar_entry_id, id, pay_date, method, amount, ref_note FROM payments
+       WHERE ${payWhere.join(' AND ')}
        ORDER BY pay_date, id`,
-      [karigarId, ids],
+      payParams,
     )).rows;
 
     const linesBy = new Map<number, EntryLine[]>();
@@ -268,11 +277,29 @@ export const karigarEntriesRepo = {
       list.push({ id: l.id, name: l.name, size: l.size, design: l.design, qty: l.qty });
       linesBy.set(l.entry_id, list);
     }
+    const idSet = new Set(ids);
     const paysBy = new Map<number, Entry['payments']>();
+    const loose: Entry[] = [];
     for (const p of pays) {
-      const list = paysBy.get(p.karigar_entry_id) ?? [];
-      list.push({ id: p.id, date: p.pay_date, method: p.method, amount: Number(p.amount) });
-      paysBy.set(p.karigar_entry_id, list);
+      const line = { id: p.id, date: p.pay_date, method: p.method, amount: Number(p.amount) };
+      if (p.karigar_entry_id != null && idSet.has(p.karigar_entry_id)) {
+        const list = paysBy.get(p.karigar_entry_id) ?? [];
+        list.push(line);
+        paysBy.set(p.karigar_entry_id, list);
+        continue;
+      }
+      // A payment with no movement of its own: negative id so it can never
+      // collide with a real entry, and direction null so the UI leaves both
+      // material columns blank.
+      loose.push({
+        id: -p.id,
+        direction: null,
+        date: p.pay_date,
+        remark: p.ref_note,
+        lines: [],
+        payments: [line],
+        paid: line.amount,
+      });
     }
 
     // Search filters on what is visible — the remark or any line's name, size or
@@ -289,7 +316,7 @@ export const karigarEntriesRepo = {
       const myPays = paysBy.get(e.id) ?? [];
       out.push({
         id: e.id,
-        direction: e.direction,
+        direction: e.direction as Direction | null,
         date: e.entry_date,
         remark: e.remark,
         lines: myLines,
@@ -298,12 +325,16 @@ export const karigarEntriesRepo = {
       });
     }
 
+    // Loose payments join the same chronology, newest first.
+    const all = [...out, ...loose].sort((a, b) =>
+      a.date === b.date ? b.id - a.id : (a.date < b.date ? 1 : -1));
+
     return {
-      entries: out,
+      entries: all,
       totals: {
-        in: out.filter((e) => e.direction === 'in').length,
-        out: out.filter((e) => e.direction === 'out').length,
-        paid: out.reduce((n, e) => n + e.paid, 0),
+        in: all.filter((e) => e.direction === 'in').length,
+        out: all.filter((e) => e.direction === 'out').length,
+        paid: all.reduce((n, e) => n + e.paid, 0),
       },
     };
   },
