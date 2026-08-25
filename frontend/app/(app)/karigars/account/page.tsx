@@ -210,15 +210,15 @@ export default function KarigarAccountPage() {
           {/* ── Job-wise khata: what went out (diya) against what came back (aaya) ── */}
           <div className="mt-2 overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-xs)]">
             <div className="max-h-[calc(100vh-300px)] min-h-[16rem] overflow-auto">
-              <table className="ledger-table w-full border-separate border-spacing-0 text-base md:min-w-[1180px]">
+              <table className="ledger-table w-full border-separate border-spacing-0 text-base md:min-w-[1130px]">
                 {/* One header row, not two: the colour now says which column is
                     which, so a grouping strip above it is redundant. */}
                 <thead className="sticky top-0 z-10">
                   <tr className="text-sm uppercase tracking-[0.07em]">
                     <th className="w-24 whitespace-nowrap border-b border-border-strong bg-surface-2 px-3 py-3 text-left font-bold text-muted">Job</th>
-                    <th className="khata-head-in w-[37%] whitespace-nowrap border-b border-border-strong px-3 py-3 text-left font-bold">Item In</th>
-                    <th className="khata-head-raw w-[37%] whitespace-nowrap border-b border-l border-border-strong px-3 py-3 text-left font-bold">Raw Material</th>
-                    <th className="khata-head-pay w-[15rem] whitespace-nowrap border-b border-l border-border-strong px-3 py-3 text-left font-bold">Payment</th>
+                    <th className="khata-head-in w-[36%] whitespace-nowrap border-b border-border-strong px-3 py-3 text-left font-bold">Item In</th>
+                    <th className="khata-head-raw w-[36%] whitespace-nowrap border-b border-l border-border-strong px-3 py-3 text-left font-bold">Raw Material</th>
+                    <th className="khata-head-pay w-[13rem] whitespace-nowrap border-b border-l border-border-strong px-3 py-3 text-left font-bold">Payment</th>
                   </tr>
                 </thead>
 
@@ -253,7 +253,7 @@ export default function KarigarAccountPage() {
                               <span className="text-[12.5px] font-semibold uppercase tracking-wide text-[color:var(--accent)]">
                                 Issued{j.issued.length > 0 ? ` · ${j.issued.length}` : ""}
                               </span>
-                              <button onClick={() => router.push(`/jobs/detail?j=${j.id}&edit=1`)} className="cursor-pointer rounded-md bg-[color:var(--accent-tint)] px-2.5 py-1 text-[13px] font-medium text-[color:var(--accent)] transition-colors hover:bg-[color:var(--accent)] hover:text-white">Out</button>
+                              <button onClick={() => router.push(`/jobs/detail?j=${j.id}&edit=1`)} aria-label="Issue material" className="cursor-pointer rounded-md bg-[color:var(--accent-tint)] px-2.5 py-1 text-[13px] font-medium text-[color:var(--accent)] transition-colors hover:bg-[color:var(--accent)] hover:text-white">Out</button>
                             </div>
                             {j.issued.length === 0 ? <span className="text-sm font-medium text-muted">Nothing issued</span> : (
                               <LineList
@@ -437,7 +437,7 @@ function ItemInCell({
         </span>
         <span className="flex items-center gap-2">
           {done && <span className="text-[13px] font-bold uppercase tracking-wide text-[color:var(--success)]">Complete</span>}
-          <button onClick={onReceive} className="cursor-pointer rounded-md bg-[color:var(--success-tint)] px-2.5 py-1 text-[13px] font-medium text-[color:var(--success)] transition-colors hover:bg-[color:var(--success)] hover:text-white">Receive</button>
+          <button onClick={onReceive} aria-label="Receive goods" className="cursor-pointer rounded-md bg-[color:var(--success-tint)] px-2.5 py-1 text-[13px] font-medium text-[color:var(--success)] transition-colors hover:bg-[color:var(--success)] hover:text-white">In</button>
         </span>
       </div>
 
@@ -492,7 +492,7 @@ function PaymentCell({
         <span className="text-[12.5px] font-semibold uppercase tracking-wide text-[color:var(--primary)]">Paid</span>
         <span className="flex items-baseline gap-2">
           <span className="font-mono text-base font-bold tabular-nums text-ink">{rupees(paid)}</span>
-          <button onClick={onPay} className="cursor-pointer rounded-md bg-primary-tint px-2.5 py-1 text-[13px] font-medium text-primary transition-colors hover:bg-primary hover:text-primary-fg">Pay</button>
+          <button onClick={onPay} aria-label="Record payment" className="cursor-pointer rounded-md bg-primary-tint px-2.5 py-1 text-[13px] font-medium text-primary transition-colors hover:bg-primary hover:text-primary-fg">Pay</button>
         </span>
       </div>
 
