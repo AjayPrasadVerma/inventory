@@ -291,6 +291,20 @@
   }
 }
 
+/* ---- Spreadsheet cell ----
+   The entry sheet should feel like typing into Excel, so the active cell lights
+   up and its row dims in behind it.
+
+   Driven by an attribute React sets, not by :focus, and written as real rules
+   rather than Tailwind utilities. Two separate reasons: :focus does not match
+   while the document itself is unfocused, which makes the state untestable; and
+   the arbitrary-value utilities for the inset ring never got emitted — the class
+   reached the element and no rule was ever generated for it. */
+[data-active-cell] {
+  background: var(--primary-tint);
+  box-shadow: inset 0 0 0 1.5px var(--primary);
+}
+
 /* ---- Khata column colour-coding ----
    The owner reads this table across the room, so each column carries its own
    hue rather than relying on a heading: green is what came back, gold is what

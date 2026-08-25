@@ -19,11 +19,36 @@ interface Line { key: number; name: string; size: string; design: string; qty: s
 let seq = 0;
 const blank = (): Line => ({ key: ++seq, name: "", size: "", design: "", qty: "" });
 
+/** A sheet opens with room to type into, not one row and a button. */
+const BLANK_ROWS = 7;
+const blankRows = () => Array.from({ length: BLANK_ROWS }, blank);
+
 // Written out in full: Tailwind scans source text, so a class assembled from a
-// template literal is never emitted and the grid collapses to one column.
-const GRID = "grid grid-cols-1 gap-2 sm:grid-cols-[2rem_minmax(0,1fr)_9rem_9rem_7rem_2.25rem] sm:items-center";
+// template literal is never emitted and the grid collapses to one column. No gap
+// — the cells butt against each other so their borders form the lattice.
+const GRID = "grid grid-cols-1 sm:grid-cols-[2.5rem_minmax(0,1fr)_9rem_9rem_7rem_2.5rem]";
+
+/**
+ * A spreadsheet cell, not a form field. The shared Input carries its own border,
+ * rounding and background, which is exactly what makes a sheet stop looking like
+ * one — and `cn` is a plain join with no tailwind-merge, so those base classes
+ * cannot be reliably overridden from a className. So the cell owns its input.
+ */
+const CELL_INPUT =
+  "sheet-cell h-9 w-full min-w-0 border-0 bg-transparent px-2 text-sm text-ink outline-none";
+
+/** Which cell is being typed into, tracked in React rather than left to CSS
+ *  :focus. Excel highlights the active row as well as the cell, and a state flag
+ *  can drive both — a :focus rule can only reach the input it is on. */
+type Focus = { row: number; col: string } | null;
 
 const MODES = ["Cash", "UPI", "Bank", "Cheque"];
+
+/** Marks the active cell. The look lives in globals.css under
+ *  [data-active-cell] — see the note there for why it is not a utility. */
+function activeCell(focus: Focus, row: number, col: string): true | undefined {
+  return focus?.row === row && focus.col === col ? true : undefined;
+}
 
 /**
  * One form for both directions of karigar movement.
@@ -58,10 +83,11 @@ export function KarigarEntryModal({
   const [remark, setRemark] = useState("");
   const [advance, setAdvance] = useState("");
   const [mode, setMode] = useState(MODES[0]!);
-  const [lines, setLines] = useState<Line[]>([blank()]);
+  const [lines, setLines] = useState<Line[]>(blankRows);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [saving, setSaving] = useState(false);
   const gridRef = useRef<HTMLDivElement>(null);
+  const [focus, setFocus] = useState<Focus>(null);
 
   useEffect(() => {
     api<{ data: Suggestion[] }>(`/karigars/suggest?direction=${direction}&q=`)
@@ -185,14 +211,15 @@ export function KarigarEntryModal({
         </Field>
       </div>
 
-      <div className="mt-5 overflow-hidden rounded-[14px] border border-border bg-surface">
-        <div className={`${GRID} hidden border-b border-border bg-surface-2 px-3 py-2 text-[10.5px] font-semibold uppercase tracking-wide text-muted sm:grid`}>
-          <span>#</span>
-          <span>Item</span>
-          <span>Size</span>
-          <span>Design</span>
-          <span className="text-right">Quantity</span>
-          <span />
+      <div className="mt-5 overflow-hidden rounded-md border border-border-strong bg-surface">
+        {/* Header reads as a sheet header: grey, tight, ruled off from the body. */}
+        <div className={`${GRID} hidden border-b border-border-strong bg-surface-2 text-[11px] font-semibold uppercase tracking-wide text-muted sm:grid`}>
+          <span className="border-r border-border-strong px-2 py-1.5 text-center">#</span>
+          <span className="border-r border-border-strong px-2 py-1.5">Item</span>
+          <span className="border-r border-border-strong px-2 py-1.5">Size</span>
+          <span className="border-r border-border-strong px-2 py-1.5">Design</span>
+          <span className="border-r border-border-strong px-2 py-1.5 text-right">Quantity</span>
+          <span className="px-2 py-1.5" />
         </div>
 
         <div ref={gridRef}>
@@ -202,81 +229,95 @@ export function KarigarEntryModal({
             const sizeList = `sz-${l.key}`;
             const designList = `dg-${l.key}`;
             return (
-              <div key={l.key} className={`${GRID} border-b border-border px-3 py-3 last:border-b-0 sm:py-1.5`}>
-                <span className="text-xs font-semibold tabular-nums text-muted sm:font-normal">
+              <div
+                key={l.key}
+                className={`${GRID} group border-b border-border last:border-b-0 max-sm:gap-2 max-sm:px-3 max-sm:py-3 ${
+                  focus?.row === idx ? "bg-[color:var(--surface-2)]" : ""
+                }`}
+              >
+                {/* Row-number gutter, as in a spreadsheet. */}
+                <span className={`flex items-center justify-center border-r border-border text-[11px] tabular-nums max-sm:justify-start max-sm:border-0 max-sm:bg-transparent max-sm:font-semibold ${
+                  focus?.row === idx ? "bg-primary-tint font-semibold text-primary" : "bg-surface-2 text-muted"
+                }`}>
                   <span className="sm:hidden">Line </span>{idx + 1}
                 </span>
 
-                <div className="row-cell" data-label="Item">
-                  <Input
-                    dense
+                <div className="row-cell border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "name")} data-label="Item">
+                  <input
+                    className={CELL_INPUT}
                     value={l.name}
                     list={nameListId}
                     data-name-row={idx}
                     onChange={(e) => onName(l.key, e.target.value, isLast)}
-                    placeholder={isOut ? "Velvet, Board…" : "Ring Box, Tray…"}
+                    onFocus={() => setFocus({ row: idx, col: "name" })}
+                    onBlur={() => setFocus((f) => (f?.row === idx && f.col === "name" ? null : f))}
+                    placeholder={idx === 0 ? (isOut ? "Velvet, Board…" : "Ring Box, Tray…") : ""}
                     aria-label={`Item for line ${idx + 1}`}
                   />
                 </div>
 
                 {/* Size and design suggest what this name has been recorded with
                     before, but never restrict it — a new size is just typed. */}
-                <div className="row-cell" data-label="Size">
-                  <Input
-                    dense
+                <div className="row-cell border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "size")} data-label="Size">
+                  <input
+                    className={CELL_INPUT}
                     value={l.size}
                     list={known ? sizeList : undefined}
                     onChange={(e) => patch(l.key, { size: e.target.value })}
-                    placeholder={isOut ? "meter" : "2x3"}
+                    onFocus={() => setFocus({ row: idx, col: "size" })}
+                    onBlur={() => setFocus((f) => (f?.row === idx && f.col === "size" ? null : f))}
+                    placeholder={idx === 0 ? (isOut ? "meter" : "2x3") : ""}
                     aria-label="Size"
                   />
                   {known && (
                     <datalist id={sizeList}>
-                      {known.sizes.map((s) => <option key={s} value={s} />)}
+                      {known.sizes.map((v) => <option key={v} value={v} />)}
                     </datalist>
                   )}
                 </div>
 
-                <div className="row-cell" data-label="Design">
-                  <Input
-                    dense
+                <div className="row-cell border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "design")} data-label="Design">
+                  <input
+                    className={CELL_INPUT}
                     value={l.design}
                     list={known ? designList : undefined}
                     onChange={(e) => patch(l.key, { design: e.target.value })}
-                    placeholder="—"
+                    onFocus={() => setFocus({ row: idx, col: "design" })}
+                    onBlur={() => setFocus((f) => (f?.row === idx && f.col === "design" ? null : f))}
                     aria-label="Design"
                   />
                   {known && (
                     <datalist id={designList}>
-                      {known.designs.map((s) => <option key={s} value={s} />)}
+                      {known.designs.map((v) => <option key={v} value={v} />)}
                     </datalist>
                   )}
                 </div>
 
-                <div className="row-cell" data-label="Quantity">
-                  <Input
-                    dense
-                    className="text-right"
+                <div className="row-cell border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "qty")} data-label="Quantity">
+                  <input
+                    className={`${CELL_INPUT} text-right sm:text-right`}
                     value={l.qty}
                     inputMode="decimal"
-                    placeholder="0"
                     onChange={(e) => patch(l.key, { qty: e.target.value })}
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onQtyEnter(idx, isLast); } }}
+                    onFocus={() => setFocus({ row: idx, col: "qty" })}
+                    onBlur={() => setFocus((f) => (f?.row === idx && f.col === "qty" ? null : f))}
                     aria-label="Quantity"
                   />
                 </div>
 
-                <div className="flex justify-end">
-                  {lines.length > 1 && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
+                {/* Quiet until the row has something in it — an empty sheet
+                    should not show seven delete buttons. */}
+                <div className="flex items-center justify-center">
+                  {(l.name.trim() || l.qty.trim()) && lines.length > 1 && (
+                    <button
+                      type="button"
                       onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
-                      aria-label={`Remove line ${idx + 1}`}
+                      aria-label={`Clear line ${idx + 1}`}
+                      className="cursor-pointer px-2 text-muted transition-colors hover:text-[color:var(--danger)]"
                     >
-                      <Icon.Trash />
-                    </Button>
+                      ✕
+                    </button>
                   )}
                 </div>
               </div>
@@ -284,9 +325,9 @@ export function KarigarEntryModal({
           })}
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t border-border bg-surface-2 px-3 py-2">
-          <Button variant="outline" size="sm" onClick={() => setLines((ls) => [...ls, blank()])}>
-            <Icon.Plus /> Add line
+        <div className="flex items-center justify-between gap-3 border-t border-border-strong bg-surface-2 px-3 py-2">
+          <Button variant="outline" size="sm" onClick={() => setLines((ls) => [...ls, ...blankRows()])}>
+            <Icon.Plus /> Add {BLANK_ROWS} more
           </Button>
           <span className="text-xs text-muted">
             Press <kbd className="rounded border border-border bg-surface px-1">Enter</kbd> in Quantity for the next line.
