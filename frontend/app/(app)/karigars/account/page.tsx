@@ -17,35 +17,39 @@ import { PageHeader } from "@/components/page-parts";
 import { Icon } from "@/components/icons";
 import { KarigarForm, type Karigar } from "@/components/karigar-form";
 import { PayKarigarModal } from "@/components/pay-karigar-modal";
-import { JobModal } from "@/components/job-modal";
-import { ReceiveGoodsModal } from "@/components/receive-goods-modal";
+import { KarigarEntryModal, type Direction } from "@/components/karigar-entry-modal";
 
 interface KarigarLite { id: number; name: string; phone: string | null }
-interface Issued { name: string; color: string | null; unit: string; qty: string }
-interface Received { name: string; variant: string | null; qty: string }
+interface EntryLine { id: number; name: string; size: string | null; design: string | null; qty: string }
 interface PayLine { id: number; date: string; method: string | null; amount: number }
-interface Job {
+interface Entry {
   id: number;
+  /** null for a payment that belongs to no movement of its own. */
+  direction: Direction | null;
   date: string;
-  status: "open" | "closed";
-  note: string | null;
-  issued: Issued[];
-  received: Received[];
-  returned: Issued[];
+  remark: string | null;
+  lines: EntryLine[];
   payments: PayLine[];
   paid: number;
 }
-interface Unlinked { id: number; date: string; method: string | null; amount: number; note: string | null }
-interface Khata {
-  jobs: Job[];
-  unlinked: Unlinked[];
-  totals: { jobs: number; open: number; paid: number };
+interface Log {
+  entries: Entry[];
+  totals: { in: number; out: number; paid: number };
 }
 
-type PendingDelete =
-  | { kind: "job"; id: number; label: string }
-  | { kind: "payment"; id: number; label: string };
-
+/**
+ * A karigar's khata as an ordered log.
+ *
+ * It used to be job-wise: material issued on one side, goods received on the
+ * other, paired per job. That forced an order the shop does not work in — you
+ * could not record goods arriving unless material had gone out against that same
+ * job first. Now every movement is its own entry, listed newest first, and an
+ * entry sits in the column for its direction: green when something came in,
+ * yellow when material went out. Reading down the page shows the real sequence.
+ *
+ * The colours carry the meaning at a distance, which is why the actions live in
+ * the column headers rather than on each row — one In, one Out, one Pay.
+ */
 export default function KarigarAccountPage() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -63,7 +67,7 @@ export default function KarigarAccountPage() {
     [router],
   );
   const [karigar, setKarigar] = useState<Karigar | null>(null);
-  const [khata, setKhata] = useState<Khata | null>(null);
+  const [log, setLog] = useState<Log | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,30 +77,30 @@ export default function KarigarAccountPage() {
   const [search, setSearch] = useState("");
 
   const [editKarigar, setEditKarigar] = useState(false);
-  const [newJob, setNewJob] = useState(false);
-  const [receiveJob, setReceiveJob] = useState<number | null>(null);
-  const [payModal, setPayModal] = useState<{ jobId: number; ref: string } | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [entryForm, setEntryForm] = useState<Direction | null>(null);
+  const [payOpen, setPayOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<{ id: number; label: string } | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   useEffect(() => {
     cachedGet<{ data: KarigarLite[] }>("/karigars/options")
-      .then((r) => {
-        setKarigars(r.data);
-      })
+      .then((r) => setKarigars(r.data))
       .catch((e) => setError((e as Error).message));
   }, []);
 
-  const loadAccount = useCallback(async (id: string) => {
+  const loadAccount = useCallback(async (id: string, f: string, t: string) => {
     setLoading(true);
     setError(null);
     try {
-      const [k, kh] = await Promise.all([
+      const qs = new URLSearchParams();
+      if (f) qs.set("from", f);
+      if (t) qs.set("to", t);
+      const [k, l] = await Promise.all([
         api<{ data: Karigar }>(`/karigars/${id}`),
-        api<{ data: Khata }>(`/karigars/${id}/ledger`),
+        api<{ data: Log }>(`/karigars/${id}/entries?${qs.toString()}`),
       ]);
       setKarigar(k.data);
-      setKhata(kh.data);
+      setLog(l.data);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -106,50 +110,52 @@ export default function KarigarAccountPage() {
 
   useEffect(() => {
     if (!karigarId) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- loads account data after a karigar change
-    loadAccount(karigarId);
-  }, [karigarId, loadAccount]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loads account data after a karigar or range change
+    loadAccount(karigarId, from, to);
+  }, [karigarId, from, to, loadAccount]);
 
-  const refresh = useCallback(() => { if (karigarId) loadAccount(karigarId); }, [karigarId, loadAccount]);
+  const refresh = useCallback(() => {
+    if (karigarId) loadAccount(karigarId, from, to);
+  }, [karigarId, from, to, loadAccount]);
 
   const karigarOptions = useMemo<ComboOption[]>(
     () => karigars.map((k) => ({ value: String(k.id), label: k.name, sublabel: k.phone || undefined })),
     [karigars],
   );
 
-  const s = search.trim().toLowerCase();
-  const hasFilter = !!(from || to || s);
+  // Search filters what is already loaded. The API takes a search term too, but
+  // refetching per keystroke would be a request a letter for no better answer.
+  const term = search.trim().toLowerCase();
+  const entries = useMemo(() => {
+    const all = log?.entries ?? [];
+    if (!term) return all;
+    return all.filter((e) =>
+      [e.remark ?? "", ...e.lines.flatMap((l) => [l.name, l.size ?? "", l.design ?? ""])]
+        .join(" ").toLowerCase().includes(term));
+  }, [log, term]);
 
-  /** Jobs shown after the date/search filter. Totals stay all-time so Total paid
-   *  always matches the karigar's real figure on the list page. */
-  const jobs = useMemo(() => {
-    const all = khata?.jobs ?? [];
-    return all.filter((j) =>
-      (!from || j.date >= from) && (!to || j.date <= to) &&
-      (!s ||
-        String(j.id).includes(s) ||
-        (j.note ?? "").toLowerCase().includes(s) ||
-        j.issued.some((i) => i.name.toLowerCase().includes(s) || (i.color ?? "").toLowerCase().includes(s)) ||
-        j.received.some((r) => r.name.toLowerCase().includes(s) || (r.variant ?? "").toLowerCase().includes(s)) ||
-        j.payments.some((p) => (p.method ?? "").toLowerCase().includes(s))),
-    );
-  }, [khata, from, to, s]);
+  // Each column is its own stack, oldest first so the newest sits at its bottom.
+  // The API returns newest first because that is what a log wants; the columns
+  // read the other way because the owner fills them downward.
+  const oldestFirst = useMemo(() => [...entries].reverse(), [entries]);
+  const ins = useMemo(() => oldestFirst.filter((e) => e.direction === "in"), [oldestFirst]);
+  const outs = useMemo(() => oldestFirst.filter((e) => e.direction === "out"), [oldestFirst]);
+  // Money is its own stack: a payment attached to a movement and a lump sum with
+  // no movement both belong here, and neither should appear twice.
+  const money = useMemo(
+    () => oldestFirst.flatMap((e) => e.payments),
+    [oldestFirst],
+  );
 
-  const unlinked = useMemo(() => {
-    const all = khata?.unlinked ?? [];
-    return all.filter((u) =>
-      (!from || u.date >= from) && (!to || u.date <= to) &&
-      (!s || (u.method ?? "").toLowerCase().includes(s) || (u.note ?? "").toLowerCase().includes(s)),
-    );
-  }, [khata, from, to, s]);
+  const hasFilter = !!from || !!to || !!search;
+  const paidShown = money.reduce((n, p) => n + p.amount, 0);
 
   async function confirmDelete() {
-    if (!pendingDelete) return;
+    if (!pendingDelete || !karigarId) return;
     setDeleteLoading(true);
     try {
-      const path = pendingDelete.kind === "job" ? `/jobs/${pendingDelete.id}` : `/payments/${pendingDelete.id}`;
-      await api(path, { method: "DELETE" });
-      toast(pendingDelete.kind === "job" ? "Job deleted — stock reversed." : "Payment deleted", "success");
+      await api(`/karigars/${karigarId}/entries/${pendingDelete.id}`, { method: "DELETE" });
+      toast("Entry deleted", "success");
       setPendingDelete(null);
       refresh();
     } catch (e) {
@@ -159,8 +165,6 @@ export default function KarigarAccountPage() {
     }
   }
 
-  const payCount = (khata?.jobs ?? []).reduce((n, j) => n + j.payments.length, 0) + (khata?.unlinked.length ?? 0);
-
   return (
     <div className="w-full pb-10">
       <PageHeader
@@ -168,10 +172,9 @@ export default function KarigarAccountPage() {
         title={karigar?.name ?? "Karigar account"}
         subtitle={karigar ? [karigar.phone, karigar.product_types?.join(", ")].filter(Boolean).join(" · ") || undefined : undefined}
         actions={karigarId ? (
-          <>
-            <Button variant="outline" onClick={() => setEditKarigar(true)} title="Karigar details"><Icon.Edit /> <span className="hidden lg:inline">Details</span></Button>
-            <Button onClick={() => setNewJob(true)}><Icon.Plus /> <span className="hidden sm:inline">Issue material</span></Button>
-          </>
+          <Button variant="outline" onClick={() => setEditKarigar(true)} title="Karigar details">
+            <Icon.Edit /> <span className="hidden lg:inline">Details</span>
+          </Button>
         ) : undefined}
       />
 
@@ -187,7 +190,7 @@ export default function KarigarAccountPage() {
           </div>
           <div className="min-w-[12rem] flex-1">
             <Label>Search</Label>
-            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Job / material / product…" disabled={!karigarId} />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Item / size / remark…" disabled={!karigarId} />
           </div>
           {hasFilter && <Button variant="outline" onClick={() => { setFrom(""); setTo(""); setSearch(""); }}>Clear</Button>}
         </div>
@@ -199,131 +202,80 @@ export default function KarigarAccountPage() {
         <Card className="mt-3"><EmptyState title="Select a karigar" hint="Pick a karigar above to open its account." /></Card>
       ) : loading ? (
         <div className="py-20 text-center"><Spinner className="h-6 w-6 text-primary" /></div>
-      ) : khata ? (
+      ) : log ? (
         <>
           <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <Tile label="Total jobs" value={String(khata.totals.jobs)} tone="accent" />
-            <Tile label="Open jobs" value={String(khata.totals.open)} tone={khata.totals.open > 0 ? "warning" : "muted"} />
-            <Tile label="Total paid" value={rupees(khata.totals.paid)} tone="success" />
+            <Tile label="Item in" value={String(log.totals.in)} tone="in" />
+            <Tile label="Material out" value={String(log.totals.out)} tone="out" />
+            <Tile label="Total paid" value={rupees(log.totals.paid)} tone="pay" />
           </div>
 
-          {/* ── Job-wise khata: what went out (diya) against what came back (aaya) ── */}
-          <div className="mt-2 overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-xs)]">
-            <div className="max-h-[calc(100vh-300px)] min-h-[16rem] overflow-auto">
-              <table className="ledger-table w-full border-separate border-spacing-0 text-base md:min-w-[1040px]">
-                <thead className="sticky top-0 z-10">
-                  <tr>
-                    <th colSpan={3} className="border-b border-border-strong bg-surface-2 px-4 py-2.5 text-left text-sm font-semibold text-[color:var(--accent)]">
-                      Material issued
-                    </th>
-                    <th className="border-b border-l-2 border-border-strong border-l-border-strong bg-surface-2 px-4 py-2.5 text-left text-sm font-semibold text-[color:var(--success)]">
-                      Goods received &amp; payment
-                    </th>
-                  </tr>
-                  <tr className="text-xs uppercase tracking-[0.09em] text-muted">
-                    <th className="w-28 whitespace-nowrap border-b border-border-strong bg-surface px-4 py-2 text-left font-semibold">Date</th>
-                    <th className="w-32 whitespace-nowrap border-b border-border-strong bg-surface px-4 py-2 text-left font-semibold">Job</th>
-                    <th className="border-b border-border-strong bg-surface px-4 py-2 text-left font-semibold">Issued — raw material</th>
-                    <th className="w-[40%] whitespace-nowrap border-b border-l-2 border-border-strong border-l-border-strong bg-surface px-4 py-2 text-left font-semibold">
-                      Received — goods · paid
-                    </th>
-                  </tr>
-                </thead>
+          {/* Three independent stacks, not one row per entry. Pairing every
+              movement into a shared row left half of the table showing a dash,
+              which the owner reads as wasted space rather than as information.
+              Each column now packs its own entries oldest-first, so the newest
+              sits at the bottom of its own column and the two sides grow at
+              whatever rate the work actually happened. */}
+          <div className="mt-2 grid gap-2 lg:grid-cols-[1fr_1fr_15rem]">
+            <Stack
+              title="Item In"
+              headClass="khata-head-in"
+              bodyClass="khata-col-in"
+              action={
+                <StackButton onClick={() => setEntryForm("in")} label="+ In" aria="Record goods coming in" className="bg-[color:var(--success)] text-white" />
+              }
+              empty="Nothing received in this range."
+            >
+              {ins.map((e) => (
+                <EntryBlock key={e.id} entry={e} onDelete={isOwner ? () => setPendingDelete({ id: e.id, label: `In on ${formatDate(e.date)}` }) : undefined} />
+              ))}
+            </Stack>
 
-                <tbody>
-                  {jobs.map((j) => {
-                    const done = j.status === "closed";
-                    const cell = `border-b border-border-strong px-4 py-2.5 align-top max-md:border-b-0 ${done ? "bg-[color:var(--success-tint)]" : ""}`;
-                    return (
-                      <tr key={j.id}>
-                        <td data-label="Date" className={`${cell} whitespace-nowrap font-mono text-sm font-semibold text-muted`}>{formatDate(j.date)}</td>
-                        <td data-label="Job" className={cell}>
-                          <span className="whitespace-nowrap font-mono text-[15px] font-semibold text-ink">#{j.id}</span>
-                          {j.note && <span className="mt-0.5 block max-w-[9rem] truncate text-[12px] text-muted" title={j.note}>{j.note}</span>}
-                          <span className="mt-1 flex gap-3 text-[13px]">
-                            <button onClick={() => router.push(`/jobs/detail?j=${j.id}`)} className="cursor-pointer text-muted underline-offset-2 hover:text-ink hover:underline">Open</button>
-                            {isOwner && (
-                              <button onClick={() => setPendingDelete({ kind: "job", id: j.id, label: `Job #${j.id}` })} className="cursor-pointer text-muted underline-offset-2 hover:text-[color:var(--danger)] hover:underline">Delete</button>
-                            )}
-                          </span>
-                        </td>
-                        <td data-label="Issued — raw material" className={`${cell} text-[15px] font-medium`}>
-                          {j.issued.length === 0 ? <span className="text-muted">—</span> : (
-                            <>
-                              {j.issued.length > 3 && (
-                                <span className="mb-1.5 inline-block rounded-full bg-surface-2 px-2 py-0.5 text-[11.5px] font-semibold uppercase tracking-wide text-muted">
-                                  {j.issued.length} items
-                                </span>
-                              )}
-                              <div className={j.issued.length > 3 ? "sm:columns-2 sm:gap-x-8" : undefined}>
-                                {j.issued.map((it, k) => (
-                                  <span key={k} className="block break-inside-avoid">
-                                    {it.name}
-                                    {it.color ? <span className="text-muted"> ({it.color})</span> : null}
-                                    <span className="text-muted"> · {fmtQty(it.qty)} {it.unit}</span>
-                                  </span>
-                                ))}
-                              </div>
-                            </>
-                          )}
-                          {j.returned.length > 0 && (
-                            <span className="mt-1.5 block text-[13px] text-muted">
-                              Returned: {j.returned.map((r) => `${r.name}${r.color ? ` (${r.color})` : ""} · ${fmtQty(r.qty)} ${r.unit}`).join(", ")}
-                            </span>
-                          )}
-                        </td>
-                        <td data-label="Received — goods · paid" className={`border-b border-l-2 border-border-strong border-l-border-strong px-4 py-2.5 align-top max-md:border-b-0 max-md:border-l-0 max-md:border-t-2 ${done ? "bg-[color:var(--success-tint)]" : ""}`}>
-                          <ReturnBox
-                            done={done}
-                            received={j.received}
-                            payments={j.payments}
-                            paid={j.paid}
-                            onReceive={() => setReceiveJob(j.id)}
-                            onPay={() => setPayModal({ jobId: j.id, ref: `Job #${j.id}` })}
-                            onDeletePay={isOwner ? (p) => setPendingDelete({ kind: "payment", id: p.id, label: `${rupees(p.amount)} on ${formatDate(p.date)}` }) : undefined}
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
+            <Stack
+              title="Raw Material"
+              headClass="khata-head-raw"
+              bodyClass="khata-col-raw"
+              action={
+                <StackButton onClick={() => setEntryForm("out")} label="+ Out" aria="Issue material out" className="bg-[color:var(--accent)] text-white" />
+              }
+              empty="Nothing issued in this range."
+            >
+              {outs.map((e) => (
+                <EntryBlock key={e.id} entry={e} onDelete={isOwner ? () => setPendingDelete({ id: e.id, label: `Out on ${formatDate(e.date)}` }) : undefined} />
+              ))}
+            </Stack>
 
-                  {/* Lump sums not tied to any job — still part of what the karigar was paid. */}
-                  {unlinked.map((u) => (
-                    <tr key={`u${u.id}`}>
-                      <td data-label="Date" className="border-b border-border-strong px-4 py-2.5 align-top font-mono text-sm font-semibold text-muted max-md:border-b-0">{formatDate(u.date)}</td>
-                      <td data-label="Job" className="border-b border-border-strong px-4 py-2.5 align-top font-mono text-[15px] text-muted max-md:border-b-0">—</td>
-                      <td data-label="Issued — raw material" className="border-b border-border-strong px-4 py-2.5 align-top text-[15px] font-medium text-muted max-md:border-b-0">
-                        Payment not tied to a job{u.note ? ` · ${u.note}` : ""}
-                      </td>
-                      <td data-label="Received — goods · paid" className="border-b border-l-2 border-border-strong border-l-border-strong px-4 py-2.5 align-top max-md:border-b-0 max-md:border-l-0 max-md:border-t-2">
-                        <PayRow line={{ id: u.id, date: u.date, method: u.method, amount: u.amount }}
-                          onDelete={isOwner ? () => setPendingDelete({ kind: "payment", id: u.id, label: `${rupees(u.amount)} on ${formatDate(u.date)}` }) : undefined} />
-                      </td>
-                    </tr>
-                  ))}
-
-                  {jobs.length === 0 && unlinked.length === 0 && (
-                    <tr><td colSpan={4} className="px-4 py-10 text-center text-muted">
-                      No jobs{hasFilter ? " match these filters" : " yet"}.
-                    </td></tr>
-                  )}
-                </tbody>
-
-                <tfoot>
-                  <tr>
-                    <td colSpan={3} className="border-t border-border-strong bg-surface-2 px-4 py-2.5 text-[12.5px] font-semibold uppercase tracking-wide text-muted">
-                      {jobs.length < khata.jobs.length ? `${jobs.length} of ${khata.jobs.length}` : khata.jobs.length} jobs · {payCount} payments
-                    </td>
-                    <td className="border-l-2 border-t border-border-strong border-l-border-strong bg-surface-2 px-4 py-2.5 max-md:hidden" />
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+            {/* Every rupee paid in range, however it was linked. A payment made
+                against one of the old jobs carries a job_id and a lump sum
+                carries nothing, so following only the entry link showed a total
+                of zero while the money sat in the table. */}
+            <Stack
+              title="Payment"
+              headClass="khata-head-pay"
+              bodyClass="khata-col-pay"
+              action={
+                <StackButton onClick={() => setPayOpen(true)} label="+ Pay" aria="Record a payment" className="bg-primary text-primary-fg" />
+              }
+              empty="No payment in this range."
+            >
+              {money.map((p) => (
+                <div key={p.id} className="border-b border-border-strong px-3 py-2.5 last:border-b-0">
+                  <span className="flex items-baseline justify-between gap-2">
+                    <span className="font-mono text-[13px] font-semibold text-muted">{formatDate(p.date)}</span>
+                    <span className="font-mono text-[15px] font-bold tabular-nums text-ink">{rupees(p.amount)}</span>
+                  </span>
+                  <span className="mt-0.5 block text-[13px] text-muted">{p.method || "—"}</span>
+                </div>
+              ))}
+            </Stack>
           </div>
+
+          <p className="mt-2 text-[12.5px] font-semibold uppercase tracking-wide text-muted">
+            {ins.length} in · {outs.length} out · {rupees(paidShown)} paid
+          </p>
         </>
       ) : null}
 
-      {/* ── Modals ───────────────────────────────────────────────────── */}
       {editKarigar && karigar && (
         <KarigarForm
           karigar={karigar}
@@ -332,42 +284,33 @@ export default function KarigarAccountPage() {
         />
       )}
 
-      {newJob && karigar && (
-        <JobModal
+      {entryForm && karigar && (
+        <KarigarEntryModal
           karigarId={karigar.id}
           karigarName={karigar.name}
-          onClose={() => setNewJob(false)}
-          onDone={() => { setNewJob(false); refresh(); }}
+          direction={entryForm}
+          onClose={() => setEntryForm(null)}
+          onDone={() => { setEntryForm(null); refresh(); }}
         />
       )}
 
-      {receiveJob !== null && karigar && (
-        <ReceiveGoodsModal
-          jobId={receiveJob}
-          karigarName={karigar.name}
-          onClose={() => setReceiveJob(null)}
-          onDone={() => { setReceiveJob(null); refresh(); }}
-        />
-      )}
-
-      {payModal && karigar && (
+      {payOpen && karigar && (
         <PayKarigarModal
           karigarId={karigar.id}
           karigarName={karigar.name}
-          jobId={payModal.jobId}
-          againstRef={payModal.ref}
-          onClose={() => setPayModal(null)}
-          onDone={() => { setPayModal(null); refresh(); }}
+          onClose={() => setPayOpen(false)}
+          onDone={() => { setPayOpen(false); refresh(); }}
         />
       )}
 
       <ConfirmDialog
         open={!!pendingDelete}
-        title={pendingDelete?.kind === "job" ? "Delete job?" : "Delete payment?"}
+        title="Delete entry?"
         message={
-          pendingDelete?.kind === "job"
-            ? <>Deleting <span className="font-semibold text-ink">{pendingDelete.label}</span> will reverse the material issued, any goods received, and any payment made for it. This cannot be undone.</>
-            : <>Delete the payment of <span className="font-semibold text-ink">{pendingDelete?.label}</span>? This cannot be undone.</>
+          <>
+            Deleting <span className="font-semibold text-ink">{pendingDelete?.label}</span> will reverse the
+            stock it moved and remove any advance paid with it. This cannot be undone.
+          </>
         }
         confirmLabel="Delete"
         tone="danger"
@@ -379,80 +322,108 @@ export default function KarigarAccountPage() {
   );
 }
 
-/** What came back for one job: goods made, then what was paid for it. */
-function ReturnBox({
-  done, received, payments, paid, onReceive, onPay, onDeletePay,
+/** One column of the khata: a coloured header carrying its own action, and a
+ *  stack of blocks beneath it. */
+function Stack({
+  title, headClass, bodyClass, action, empty, children,
 }: {
-  done: boolean;
-  received: Received[];
-  payments: PayLine[];
-  paid: number;
-  onReceive: () => void;
-  onPay: () => void;
-  onDeletePay?: (p: PayLine) => void;
+  title: string;
+  headClass: string;
+  bodyClass: string;
+  action: React.ReactNode;
+  empty: string;
+  children: React.ReactNode;
 }) {
+  const isEmpty = Array.isArray(children) ? children.length === 0 : !children;
   return (
-    <div className="flex h-full w-full flex-col gap-2">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="text-[12.5px] font-semibold uppercase tracking-wide text-muted">Goods made</span>
-        <span className="flex items-center gap-2">
-          {done && <span className="text-[13px] font-bold uppercase tracking-wide text-[color:var(--success)]">Complete</span>}
-          <button onClick={onReceive} className="cursor-pointer rounded-md bg-primary-tint px-2.5 py-1 text-[13px] font-medium text-primary transition-colors hover:bg-primary hover:text-primary-fg">Receive</button>
-        </span>
+    <div className="overflow-hidden rounded-xl border border-border-strong">
+      <div className={`${headClass} flex items-center justify-between gap-3 border-b border-border-strong px-3 py-2.5`}>
+        <span className="text-sm font-bold uppercase tracking-[0.07em]">{title}</span>
+        {action}
       </div>
-
-      {received.length === 0 ? (
-        <span className="text-sm font-medium text-muted">Nothing received yet</span>
-      ) : (
-        <div className="flex flex-col gap-0.5">
-          {received.map((r, i) => (
-            <span key={i} className="text-[15px] font-medium">
-              {r.name}
-              {r.variant ? <span className="text-muted"> ({r.variant})</span> : null}
-              <span className="text-muted"> · {fmtQty(r.qty)} pcs</span>
-            </span>
-          ))}
-        </div>
-      )}
-
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="text-[12.5px] font-semibold uppercase tracking-wide text-muted">Paid</span>
-        <span className="flex items-baseline gap-2">
-          <span className="font-mono text-base font-bold tabular-nums text-[color:var(--success)]">{rupees(paid)}</span>
-          <button onClick={onPay} className="cursor-pointer rounded-md bg-[color:var(--success-tint)] px-2.5 py-1 text-[13px] font-medium text-[color:var(--success)] transition-colors hover:bg-[color:var(--success)] hover:text-white">Pay</button>
-        </span>
+      <div className={`${bodyClass} min-h-[6rem]`}>
+        {isEmpty ? <p className="px-3 py-8 text-center text-sm text-muted">{empty}</p> : children}
       </div>
-
-      {payments.length > 0 && (
-        <div className="flex flex-col gap-0.5">
-          {payments.map((p) => (
-            <PayRow key={p.id} line={p} onDelete={onDeletePay ? () => onDeletePay(p) : undefined} />
-          ))}
-        </div>
-      )}
     </div>
   );
 }
 
-/** date · mode · amount — one payment. Delete stays hidden until hover to keep it quiet. */
-function PayRow({ line, onDelete }: { line: PayLine; onDelete?: () => void }) {
+function StackButton({
+  onClick, label, aria, className,
+}: { onClick: () => void; label: string; aria: string; className: string }) {
   return (
-    <div className="group grid grid-cols-[auto_1fr_auto_auto] items-baseline gap-2.5">
-      <span className="font-mono text-[13.5px] font-semibold text-muted">{formatDate(line.date)}</span>
-      <span className="text-sm font-medium text-ink">{line.method || "—"}</span>
-      <span className="font-mono text-[14.5px] font-bold tabular-nums text-[color:var(--success)]">{rupees(line.amount)}</span>
-      {onDelete ? (
-        <button onClick={onDelete} aria-label="Delete payment" className="cursor-pointer text-[13px] text-muted opacity-0 transition-opacity hover:text-[color:var(--danger)] group-hover:opacity-100">✕</button>
-      ) : <span />}
+    <button
+      onClick={onClick}
+      aria-label={aria}
+      className={`cursor-pointer rounded-md px-3 py-1 text-[13px] font-semibold transition-opacity hover:opacity-85 ${className}`}
+    >
+      {label}
+    </button>
+  );
+}
+
+/** One movement in a column: when, why, and what moved. */
+function EntryBlock({ entry, onDelete }: { entry: Entry; onDelete?: () => void }) {
+  return (
+    <div className="border-b border-border-strong px-3 py-2.5 last:border-b-0">
+      <span className="flex items-baseline justify-between gap-2">
+        <span className="font-mono text-[13px] font-semibold text-muted">{formatDate(entry.date)}</span>
+        {onDelete && (
+          <button
+            onClick={onDelete}
+            className="cursor-pointer text-[12.5px] text-muted underline-offset-2 hover:text-[color:var(--danger)] hover:underline"
+          >
+            Delete
+          </button>
+        )}
+      </span>
+      {entry.remark && (
+        <span className="mt-0.5 block truncate text-[12.5px] text-muted" title={entry.remark}>{entry.remark}</span>
+      )}
+      <div className="mt-1">
+        <LineList lines={entry.lines} />
+      </div>
+    </div>
+  );
+}
+
+/** The lines of one entry: what moved, in what size and design, how much. */
+function LineList({ lines }: { lines: EntryLine[] }) {
+  const [open, setOpen] = useState(false);
+  const LIMIT = 6;
+  const shown = open ? lines : lines.slice(0, LIMIT);
+  const hidden = lines.length - shown.length;
+  return (
+    <div className="flex flex-col gap-0.5">
+      {shown.map((l) => (
+        <span key={l.id} className="text-[15px] font-medium">
+          {l.name}
+          {(l.size || l.design) && (
+            <span className="text-muted">
+              {" ("}
+              {[l.size, l.design].filter(Boolean).join(" · ")}
+              {")"}
+            </span>
+          )}
+          <span className="text-muted"> · {fmtQty(Number(l.qty))}</span>
+        </span>
+      ))}
+      {(hidden > 0 || open) && (
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="mt-0.5 w-fit cursor-pointer text-[13px] font-semibold text-muted underline-offset-2 hover:text-ink hover:underline"
+        >
+          {open ? "Show less" : `+${hidden} more`}
+        </button>
+      )}
     </div>
   );
 }
 
 const TILE_TONE: Record<string, string> = {
-  accent: "bg-[color:var(--accent-tint)] text-[color:var(--accent)]",
-  success: "bg-[color:var(--success-tint)] text-[color:var(--success)]",
-  warning: "bg-[color:var(--warning-tint)] text-[color:var(--warning)]",
-  muted: "bg-surface-2 text-muted",
+  in: "khata-col-in text-[color:var(--success)]",
+  out: "khata-col-raw text-[color:var(--accent)]",
+  pay: "khata-col-pay text-[color:var(--primary)]",
 };
 
 function Tile({ label, value, tone }: { label: string; value: string; tone: keyof typeof TILE_TONE }) {

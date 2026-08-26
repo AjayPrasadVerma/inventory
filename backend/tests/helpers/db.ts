@@ -89,6 +89,7 @@ export async function migrate(): Promise<void> {
  *  between tests. Children before parents so no CASCADE is needed. */
 const TXN_TABLES = [
   'payments', 'sale_items', 'sales', 'job_receipts', 'job_issues', 'jobs',
+  'karigar_entry_lines', 'karigar_entries',
   'purchase_items', 'purchases', 'finished_stock_movements', 'stock_movements',
 ];
 

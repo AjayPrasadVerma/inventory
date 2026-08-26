@@ -93,7 +93,10 @@ const RULES = [
       const t = line.trim();
       // Comments are exempt — this rule is about what a user sees.
       if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return false;
-      const HINGLISH = /\b(zaroori|jaruri|kripya|galat|maal|kharid|bhugtan|hisaab|khata|kapda|bakaya|paisa|nahi|kitna|diya|aaya)\b/i;
+      // Not \b: that treats a kebab-case identifier as prose, so the CSS class
+      // "khata-col-in" tripped the rule. A hyphen on either side means this is a
+      // token, not a sentence — real prose never reads "khata-head".
+      const HINGLISH = /(?<![\w-])(zaroori|jaruri|kripya|galat|maal|kharid|bhugtan|hisaab|khata|kapda|bakaya|paisa|nahi|kitna|diya|aaya)(?![\w-])/i;
       // Only inside quoted strings: `khata` as an identifier or type name is fine.
       for (const m of line.matchAll(/"([^"\\]*)"|'([^'\\]*)'/g)) {
         const text = m[1] ?? m[2] ?? '';

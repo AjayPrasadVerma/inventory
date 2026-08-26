@@ -128,9 +128,9 @@ export const karigarsRepo = {
       date: string;
       status: 'open' | 'closed';
       note: string | null;
-      issued: { name: string; color: string | null; unit: string; qty: string }[];
-      received: { name: string; variant: string | null; qty: string }[];
-      returned: { name: string; color: string | null; unit: string; qty: string }[];
+      issued: { name: string; color: string | null; unit: string; qty: string; on: string }[];
+      received: { name: string; variant: string | null; qty: string; on: string }[];
+      returned: { name: string; color: string | null; unit: string; qty: string; on: string }[];
       payments: { id: number; date: string; method: string | null; amount: number }[];
       paid: number;
     }[];
@@ -147,38 +147,38 @@ export const karigarsRepo = {
     )).rows;
 
     // Material issued to the karigar, per job.
-    const issueRows = (await query<{ job_id: number; name: string; color: string | null; unit: string; qty: string }>(
-      `SELECT ji.job_id, i.name, iv.color, ji.unit, ji.qty
+    const issueRows = (await query<{ job_id: number; name: string; color: string | null; unit: string; qty: string; on: string }>(
+      `SELECT ji.job_id, i.name, iv.color, ji.unit, ji.qty, ji.issued_on AS on
        FROM job_issues ji
        JOIN jobs j ON j.id = ji.job_id
        JOIN items i ON i.id = ji.item_id
        LEFT JOIN item_variants iv ON iv.id = ji.variant_id
        WHERE j.karigar_id = $1
-       ORDER BY ji.id`,
+       ORDER BY ji.issued_on, ji.id`,
       [id],
     )).rows;
 
     // Finished goods returned by the karigar, per job.
-    const receiptRows = (await query<{ job_id: number; name: string; variant: string | null; qty: string }>(
-      `SELECT jr.job_id, p.name, pv.variant, jr.qty
+    const receiptRows = (await query<{ job_id: number; name: string; variant: string | null; qty: string; on: string }>(
+      `SELECT jr.job_id, p.name, pv.variant, jr.qty, jr.received_on AS on
        FROM job_receipts jr
        JOIN jobs j ON j.id = jr.job_id
        JOIN products p ON p.id = jr.product_id
        LEFT JOIN product_variants pv ON pv.id = jr.variant_id
        WHERE j.karigar_id = $1
-       ORDER BY jr.id`,
+       ORDER BY jr.received_on, jr.id`,
       [id],
     )).rows;
 
     // Left-over raw material sent back (recorded as a negative-reason movement on the job).
-    const returnRows = (await query<{ job_id: number; name: string; color: string | null; unit: string; qty: string }>(
-      `SELECT sm.ref_id AS job_id, i.name, iv.color, sm.unit, ABS(sm.qty) AS qty
+    const returnRows = (await query<{ job_id: number; name: string; color: string | null; unit: string; qty: string; on: string }>(
+      `SELECT sm.ref_id AS job_id, i.name, iv.color, sm.unit, ABS(sm.qty) AS qty, sm.moved_on AS on
        FROM stock_movements sm
        JOIN jobs j ON j.id = sm.ref_id
        JOIN items i ON i.id = sm.item_id
        LEFT JOIN item_variants iv ON iv.id = sm.variant_id
        WHERE sm.reason = 'job_return' AND j.karigar_id = $1
-       ORDER BY sm.id`,
+       ORDER BY sm.moved_on, sm.id`,
       [id],
     )).rows;
 
@@ -226,9 +226,9 @@ export const karigarsRepo = {
         date: j.job_date,
         status: j.status,
         note: j.expected_note,
-        issued: (issuedBy.get(j.id) ?? []).map((r) => ({ name: r.name, color: r.color, unit: r.unit, qty: r.qty })),
-        received: (receivedBy.get(j.id) ?? []).map((r) => ({ name: r.name, variant: r.variant, qty: r.qty })),
-        returned: (returnedBy.get(j.id) ?? []).map((r) => ({ name: r.name, color: r.color, unit: r.unit, qty: r.qty })),
+        issued: (issuedBy.get(j.id) ?? []).map((r) => ({ name: r.name, color: r.color, unit: r.unit, qty: r.qty, on: r.on })),
+        received: (receivedBy.get(j.id) ?? []).map((r) => ({ name: r.name, variant: r.variant, qty: r.qty, on: r.on })),
+        returned: (returnedBy.get(j.id) ?? []).map((r) => ({ name: r.name, color: r.color, unit: r.unit, qty: r.qty, on: r.on })),
         payments,
         paid: payments.reduce((n, p) => n + p.amount, 0),
       };

@@ -25,6 +25,18 @@
   --danger-tint: #f7e1dc;
   --info: #1d7488;
   --info-tint: #e0eef1;
+  color-scheme: light;
+  --sheet-num: #eef1f7;
+  --sheet-item: #fdf7ec;
+  --sheet-size: #f1f6fc;
+  --sheet-design: #f7f2fb;
+  --sheet-qty: #f1f8f3;
+  --khata-in: #d6ecdf;
+  --khata-raw: #f9ebc4;
+  --khata-pay: #dbe3fa;
+  --khata-in-head: #bfe0cc;
+  --khata-raw-head: #f2dfa4;
+  --khata-pay-head: #c4d0f5;
   --ring: #2e3577;
   --sidebar: #ffffff;
   --nav: #1b204c;
@@ -55,6 +67,18 @@
   --danger-tint: #2e1815;
   --info: #4fb0c6;
   --info-tint: #12262b;
+  color-scheme: dark;
+  --sheet-num: #1e2131;
+  --sheet-item: #26221a;
+  --sheet-size: #1a2333;
+  --sheet-design: #241f33;
+  --sheet-qty: #182620;
+  --khata-in: #17301f;
+  --khata-raw: #322813;
+  --khata-pay: #1e2547;
+  --khata-in-head: #1d4230;
+  --khata-raw-head: #4a3c1c;
+  --khata-pay-head: #2b3468;
   --ring: #7c86d6;
   --sidebar: #14151f;
   --nav: #0c0d14;
@@ -246,8 +270,11 @@
    about 1040px, so on a phone the whole payment side sat off-screen and the
    pairing the T exists to show was invisible. Each row becomes a card instead,
    purchase above and its payments below, which keeps the pairing vertically.
-   The tds carry their own labels since the header is gone. */
-@media (max-width: 767px) {
+   The tds carry their own labels since the header is gone.
+
+   Cut at 1024, not 768: the T needs ~1040px, so every tablet width below that
+   was getting the table and a horizontal scroll rather than the cards. */
+@media (max-width: 1023px) {
   .ledger-table,
   .ledger-table tbody,
   .ledger-table tfoot,
@@ -278,6 +305,85 @@
     color: var(--muted);
   }
 }
+
+/* A sheet cell wrapper that is always a real box.
+   .row-cell uses display:contents so the control itself is the grid item, which
+   is right for a form but fatal for a sheet: an element with no box paints no
+   border, no background and no ring — which is exactly why the vertical rules
+   were missing from the body while the header had them, and why the active-cell
+   highlight never appeared even though getComputedStyle resolved it. */
+.sheet-cell-wrap {
+  min-width: 0;
+}
+
+@media (max-width: 639px) {
+  .sheet-cell-wrap {
+    display: grid;
+    grid-template-columns: 4.75rem minmax(0, 1fr);
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .sheet-cell-wrap[data-label]::before {
+    content: attr(data-label);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  .sheet-cell-wrap input {
+    text-align: left;
+  }
+}
+
+/* Each sheet column gets its own tint so the eye can tell them apart without
+   reading the header. Faint on purpose: the cell's own text has to stay louder
+   than its background. Declared before [data-active-cell] so the active cell's
+   highlight wins over the column it sits in. */
+.sheet-col-num    { background: var(--sheet-num); }
+.sheet-col-item   { background: var(--sheet-item); }
+.sheet-col-size   { background: var(--sheet-size); }
+.sheet-col-design { background: var(--sheet-design); }
+.sheet-col-qty    { background: var(--sheet-qty); }
+
+/* A row a save attempt rejected. Overrides the per-column tints, which is why it
+   is declared after them, and it beats the row-focus tint too — a rejected row
+   should stay red while it is being corrected. */
+[data-bad-row] > .sheet-cell-wrap,
+[data-bad-row] > .sheet-col-num {
+  background: var(--danger-tint);
+}
+
+/* ---- Spreadsheet cell ----
+   The entry sheet should feel like typing into Excel, so the active cell lights
+   up and its row dims in behind it.
+
+   Driven by an attribute React sets, not by :focus, and written as real rules
+   rather than Tailwind utilities. Two separate reasons: :focus does not match
+   while the document itself is unfocused, which makes the state untestable; and
+   the arbitrary-value utilities for the inset ring never got emitted — the class
+   reached the element and no rule was ever generated for it. */
+[data-active-cell] {
+  background: var(--primary-tint);
+  box-shadow: inset 0 0 0 1.5px var(--primary);
+}
+
+/* ---- Khata column colour-coding ----
+   The owner reads this table across the room, so each column carries its own
+   hue rather than relying on a heading: green is what came back, gold is what
+   went out, indigo is money. The header takes the full tint and the cells a
+   diluted one, so the column reads as a continuous band down the page without
+   the body shouting over the content sitting on it.
+
+   Built from the existing tint tokens, so both themes are already handled — the
+   dark palette redefines the same variables. */
+.khata-head-in   { background: var(--khata-in-head);  color: var(--success); }
+.khata-head-raw  { background: var(--khata-raw-head); color: var(--accent); }
+.khata-head-pay  { background: var(--khata-pay-head); color: var(--primary); }
+
+.khata-col-in    { background: var(--khata-in); }
+.khata-col-raw   { background: var(--khata-raw); }
+.khata-col-pay   { background: var(--khata-pay); }
 
 /* The brand mark reversed out for the dark top rail. Works because the source
    PNG is one flat colour: brightness(0) crushes it to black, invert lifts it to

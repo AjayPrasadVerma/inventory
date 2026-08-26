@@ -7,6 +7,7 @@ import { catalogueRouter } from './modules/catalogue/catalogue.routes.js';
 import { customersRouter } from './modules/customers/customers.routes.js';
 import { itemsRouter } from './modules/items/items.routes.js';
 import { jobsRouter } from './modules/jobs/jobs.routes.js';
+import { karigarEntriesRouter } from './modules/karigar-entries/karigar-entries.routes.js';
 import { karigarsRouter } from './modules/karigars/karigars.routes.js';
 import { paymentsRouter } from './modules/payments/payments.routes.js';
 import { productsRouter } from './modules/products/products.routes.js';
@@ -34,6 +35,9 @@ export function createApp() {
 
   app.use('/api/auth', authRouter);
   app.use('/api/vendors', vendorsRouter);
+  // Mounted before the karigars router so /karigars/suggest is not swallowed by
+  // its /:id route.
+  app.use('/api/karigars', karigarEntriesRouter);
   app.use('/api/karigars', karigarsRouter);
   app.use('/api/catalogue', catalogueRouter);
   app.use('/api/items', itemsRouter);
