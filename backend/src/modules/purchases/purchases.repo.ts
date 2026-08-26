@@ -1,5 +1,7 @@
+import type { PoolClient } from 'pg';
 import { query, withTransaction } from '../../config/db.js';
 import { likeTerm } from '../../utils/sql.js';
+import { kindOfName, resolveFinishedLine, resolveRawLine } from '../../utils/catalogue-resolve.js';
 
 /**
  * One purchase line. `kind` decides which side of stock it lands on:
@@ -12,9 +14,36 @@ export interface PurchaseItemInput {
   item_id?: number | null;
   product_id?: number | null;
   variant_id?: number | null;
-  unit: string;
+  unit?: string;
   qty: number;
   rate: number;
+
+  /** The sheet sends a typed name instead of ids. Resolved inside this repo's own
+   *  transaction, so a purchase that fails leaves no stray catalogue row behind. */
+  name?: string | null;
+  size?: string | null;
+  design?: string | null;
+}
+
+/**
+ * Turn a typed line into ids. A name already in `products` is a bought-in
+ * finished good; anything else — including a name the shop has never recorded —
+ * is raw material, which is the overwhelming case for a vendor bill.
+ */
+async function resolveTypedLine(
+  client: PoolClient,
+  it: PurchaseItemInput,
+): Promise<PurchaseItemInput> {
+  const name = (it.name ?? '').trim();
+  if (!name) return it;
+
+  const kind = it.kind ?? (await kindOfName(client, name)) ?? 'item';
+  if (kind === 'product') {
+    const { productId, variantId } = await resolveFinishedLine(client, { name, size: it.size, design: it.design });
+    return { ...it, kind, product_id: productId, item_id: null, variant_id: variantId, unit: (it.size ?? '').trim() || 'pcs' };
+  }
+  const { itemId, unit, variantId } = await resolveRawLine(client, { name, size: it.size, design: it.design });
+  return { ...it, kind, item_id: itemId, product_id: null, variant_id: variantId, unit };
 }
 
 /** Which table a line belongs to — defaults to raw material for older callers. */
@@ -100,13 +129,17 @@ async function insertLine(
 
 export const purchasesRepo = {
   async create(input: PurchaseInput): Promise<{ id: number }> {
-    const items = input.items.map((it) => ({
-      ...it,
-      amount: Number((it.qty * it.rate).toFixed(2)),
-    }));
-    const total = items.reduce((s, it) => s + it.amount, 0);
-
     return withTransaction(async (client) => {
+      // Typed lines become ids first, inside this transaction, so the total below
+      // is computed from lines that are already fully resolved.
+      const resolved = [];
+      for (const it of input.items) resolved.push(await resolveTypedLine(client, it));
+      const items = resolved.map((it) => ({
+        ...it,
+        amount: Number((it.qty * it.rate).toFixed(2)),
+      }));
+      const total = items.reduce((s, it) => s + it.amount, 0);
+
       const { rows } = await client.query<{ id: number }>(
         `INSERT INTO purchases (vendor_id, bill_no, purchase_date, total_amount, amount_paid, notes, created_by)
          VALUES ($1,$2,COALESCE($3, CURRENT_DATE),$4,$5,$6,$7) RETURNING id`,

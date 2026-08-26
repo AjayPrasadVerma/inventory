@@ -1,6 +1,6 @@
-import type { PoolClient } from 'pg';
 import { query, withTransaction } from '../../config/db.js';
 import { likeTerm } from '../../utils/sql.js';
+import { resolveFinishedLine, resolveRawLine } from '../../utils/catalogue-resolve.js';
 
 /**
  * Karigar material movement as an ordered log.
@@ -59,91 +59,6 @@ export interface Entry {
   lines: EntryLine[];
   paid: number;
   payments: { id: number; date: string; method: string | null; amount: number }[];
-}
-
-/** Case-insensitive find, else insert. Returns the catalogue row's id. */
-async function findOrCreateCatalogue(
-  client: PoolClient,
-  direction: Direction,
-  name: string,
-): Promise<number> {
-  const table = direction === 'out' ? 'items' : 'products';
-  const found = await client.query<{ id: number }>(
-    `SELECT id FROM ${table} WHERE lower(name) = lower($1) AND is_active LIMIT 1`,
-    [name],
-  );
-  if (found.rows[0]) return found.rows[0].id;
-  const made = await client.query<{ id: number }>(
-    `INSERT INTO ${table} (name) VALUES ($1) RETURNING id`,
-    [name],
-  );
-  return made.rows[0]!.id;
-}
-
-/**
- * Resolve one raw-material line: the item, the unit it is counted in, and the
- * colour. Size carries the unit, design carries the colour — which is exactly
- * the shape items already had, so nothing about raw stock needs to change.
- */
-async function resolveRawLine(
-  client: PoolClient,
-  line: EntryLineInput,
-): Promise<{ itemId: number; unit: string; variantId: number | null }> {
-  const itemId = await findOrCreateCatalogue(client, 'out', line.name);
-  const unit = (line.size ?? '').trim() || 'pcs';
-
-  await client.query(
-    `INSERT INTO item_units (item_id, unit) VALUES ($1,$2) ON CONFLICT (item_id, unit) DO NOTHING`,
-    [itemId, unit],
-  );
-
-  const design = (line.design ?? '').trim();
-  if (!design) return { itemId, unit, variantId: null };
-
-  await client.query(
-    `INSERT INTO item_variants (item_id, color) VALUES ($1,$2) ON CONFLICT (item_id, color) DO NOTHING`,
-    [itemId, design],
-  );
-  const v = await client.query<{ id: number }>(
-    `SELECT id FROM item_variants WHERE item_id = $1 AND color = $2`,
-    [itemId, design],
-  );
-  return { itemId, unit, variantId: v.rows[0]?.id ?? null };
-}
-
-/**
- * Resolve one finished-goods line. product_variants held size and design jammed
- * into a single `variant` text field; migration 010 split them out and keeps
- * `variant` as the composed display label so older readers still work.
- */
-async function resolveFinishedLine(
-  client: PoolClient,
-  line: EntryLineInput,
-): Promise<{ productId: number; variantId: number | null }> {
-  const productId = await findOrCreateCatalogue(client, 'in', line.name);
-  const size = (line.size ?? '').trim();
-  const design = (line.design ?? '').trim();
-  if (!size && !design) return { productId, variantId: null };
-
-  const label = [size, design].filter(Boolean).join(' · ');
-  const existing = await client.query<{ id: number }>(
-    `SELECT id FROM product_variants
-     WHERE product_id = $1
-       AND COALESCE(size,'') = $2
-       AND COALESCE(design,'') = $3
-     LIMIT 1`,
-    [productId, size, design],
-  );
-  if (existing.rows[0]) return { productId, variantId: existing.rows[0].id };
-
-  const made = await client.query<{ id: number }>(
-    `INSERT INTO product_variants (product_id, variant, size, design)
-     VALUES ($1,$2,$3,$4)
-     ON CONFLICT (product_id, variant) DO UPDATE SET size = EXCLUDED.size, design = EXCLUDED.design
-     RETURNING id`,
-    [productId, label, size || null, design || null],
-  );
-  return { productId, variantId: made.rows[0]!.id };
 }
 
 export const karigarEntriesRepo = {
