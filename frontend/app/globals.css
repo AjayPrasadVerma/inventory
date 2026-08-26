@@ -25,6 +25,12 @@
   --danger-tint: #f7e1dc;
   --info: #1d7488;
   --info-tint: #e0eef1;
+  color-scheme: light;
+  --sheet-num: #eef1f7;
+  --sheet-item: #ffffff;
+  --sheet-size: #f1f6fc;
+  --sheet-design: #f7f2fb;
+  --sheet-qty: #f1f8f3;
   --khata-in: #d6ecdf;
   --khata-raw: #f9ebc4;
   --khata-pay: #dbe3fa;
@@ -61,6 +67,12 @@
   --danger-tint: #2e1815;
   --info: #4fb0c6;
   --info-tint: #12262b;
+  color-scheme: dark;
+  --sheet-num: #1e2131;
+  --sheet-item: #1a1c2b;
+  --sheet-size: #1a2333;
+  --sheet-design: #241f33;
+  --sheet-qty: #182620;
   --khata-in: #17301f;
   --khata-raw: #322813;
   --khata-pay: #1e2547;
@@ -323,6 +335,16 @@
     text-align: left;
   }
 }
+
+/* Each sheet column gets its own tint so the eye can tell them apart without
+   reading the header. Faint on purpose: the cell's own text has to stay louder
+   than its background. Declared before [data-active-cell] so the active cell's
+   highlight wins over the column it sits in. */
+.sheet-col-num    { background: var(--sheet-num); }
+.sheet-col-item   { background: var(--sheet-item); }
+.sheet-col-size   { background: var(--sheet-size); }
+.sheet-col-design { background: var(--sheet-design); }
+.sheet-col-qty    { background: var(--sheet-qty); }
 
 /* ---- Spreadsheet cell ----
    The entry sheet should feel like typing into Excel, so the active cell lights

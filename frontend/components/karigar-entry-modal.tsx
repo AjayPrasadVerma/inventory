@@ -27,7 +27,7 @@ const blankRows = (n = BLANK_ROWS) => Array.from({ length: n }, blank);
 // Written out in full: Tailwind scans source text, so a class assembled from a
 // template literal is never emitted and the grid collapses to one column. No gap
 // — the cells butt against each other so their borders form the lattice.
-const GRID = "grid grid-cols-1 sm:grid-cols-[2.5rem_minmax(0,1fr)_7rem_9rem_6rem_2.5rem] xl:grid-cols-[2.5rem_minmax(0,1fr)_8rem_14rem_7rem_2.5rem]";
+const GRID = "grid grid-cols-1 sm:grid-cols-[2.5rem_minmax(0,1fr)_7rem_11rem_5rem_2.5rem] xl:grid-cols-[2.5rem_minmax(0,1fr)_8rem_18rem_5.5rem_2.5rem]";
 
 /**
  * A spreadsheet cell, not a form field. The shared Input carries its own border,
@@ -238,11 +238,11 @@ export function KarigarEntryModal({
       <div className="mt-5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border-strong bg-surface">
         {/* Header reads as a sheet header: grey, tight, ruled off from the body. */}
         <div className={`${GRID} hidden shrink-0 border-b border-border-strong bg-surface-2 text-[11px] font-semibold uppercase tracking-wide text-muted sm:grid`}>
-          <span className="border-r border-border-strong px-2 py-1.5 text-center">#</span>
-          <span className="border-r border-border-strong px-2 py-1.5">Item</span>
-          <span className="border-r border-border-strong px-2 py-1.5">Size</span>
-          <span className="border-r border-border-strong px-2 py-1.5">Design</span>
-          <span className="border-r border-border-strong px-2 py-1.5 text-right">Quantity</span>
+          <span className="sheet-col-num border-r border-border-strong px-2 py-1.5 text-center">#</span>
+          <span className="sheet-col-item border-r border-border-strong px-2 py-1.5">Item</span>
+          <span className="sheet-col-size border-r border-border-strong px-2 py-1.5">Size</span>
+          <span className="sheet-col-design border-r border-border-strong px-2 py-1.5">Design</span>
+          <span className="sheet-col-qty border-r border-border-strong px-2 py-1.5 text-right">Quantity</span>
           <span className="px-2 py-1.5" />
         </div>
 
@@ -264,12 +264,12 @@ export function KarigarEntryModal({
               >
                 {/* Row-number gutter, as in a spreadsheet. */}
                 <span className={`flex items-center justify-center border-r border-border text-[11px] tabular-nums max-sm:justify-start max-sm:border-0 max-sm:bg-transparent max-sm:font-semibold ${
-                  focus?.row === idx ? "bg-primary-tint font-semibold text-primary" : "bg-surface-2 text-muted"
+                  focus?.row === idx ? "bg-primary-tint font-semibold text-primary" : "sheet-col-num text-muted"
                 }`}>
                   <span className="sm:hidden">Line </span>{idx + 1}
                 </span>
 
-                <div className="sheet-cell-wrap border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "name")} data-label="Item">
+                <div className="sheet-cell-wrap sheet-col-item border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "name")} data-label="Item">
                   <input
                     className={CELL_INPUT}
                     value={l.name}
@@ -285,7 +285,7 @@ export function KarigarEntryModal({
 
                 {/* Size and design suggest what this name has been recorded with
                     before, but never restrict it — a new size is just typed. */}
-                <div className="sheet-cell-wrap border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "size")} data-label="Size">
+                <div className="sheet-cell-wrap sheet-col-size border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "size")} data-label="Size">
                   <input
                     className={CELL_INPUT}
                     value={l.size}
@@ -303,7 +303,7 @@ export function KarigarEntryModal({
                   )}
                 </div>
 
-                <div className="sheet-cell-wrap border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "design")} data-label="Design">
+                <div className="sheet-cell-wrap sheet-col-design border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "design")} data-label="Design">
                   <input
                     className={CELL_INPUT}
                     value={l.design}
@@ -320,7 +320,7 @@ export function KarigarEntryModal({
                   )}
                 </div>
 
-                <div className="sheet-cell-wrap border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "qty")} data-label="Quantity">
+                <div className="sheet-cell-wrap sheet-col-qty border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "qty")} data-label="Quantity">
                   <input
                     className={`${CELL_INPUT} text-right sm:text-right`}
                     value={l.qty}
