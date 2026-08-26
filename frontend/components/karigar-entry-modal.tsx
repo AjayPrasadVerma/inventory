@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { todayISO } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
@@ -134,19 +134,32 @@ export function KarigarEntryModal({
     if (value.trim() && isLast) setLines((ls) => [...ls, blank()]);
   }
 
-  /** Enter in Quantity jumps to the next row's Item, as in the purchase grid. */
-  const focusRow = useCallback((idx: number) => {
-    const el = gridRef.current?.querySelector<HTMLInputElement>(`[data-name-row="${idx}"]`);
-    el?.focus();
-  }, []);
-
-  function onQtyEnter(idx: number, isLast: boolean) {
-    if (isLast) {
-      setLines((ls) => [...ls, blank()]);
-      setTimeout(() => focusRow(idx + 1), 0);
-    } else {
-      focusRow(idx + 1);
+  /**
+   * Enter moves to the next box, left to right and then down onto the following
+   * row — the sheet is filled cell by cell, so that is the key that should
+   * advance. Resolved from the inputs' DOM order rather than from a row/column
+   * map, so it cannot drift out of step with the markup.
+   */
+  function onCellEnter(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const box = gridRef.current;
+    if (!box) return;
+    const inputs = [...box.querySelectorAll<HTMLInputElement>("input")];
+    const i = inputs.indexOf(e.currentTarget);
+    if (i < 0) return;
+    const next = inputs[i + 1];
+    if (next) {
+      next.focus();
+      next.select();
+      return;
     }
+    // Last box of the last row: grow the sheet and land on what appears next.
+    setLines((ls) => [...ls, blank()]);
+    setTimeout(() => {
+      const grown = [...(gridRef.current?.querySelectorAll<HTMLInputElement>("input") ?? [])];
+      grown[i + 1]?.focus();
+    }, 0);
   }
 
   const filled = lines.filter((l) => l.name.trim() && Number(l.qty) > 0);
@@ -276,6 +289,7 @@ export function KarigarEntryModal({
                     list={nameListId}
                     data-name-row={idx}
                     onChange={(e) => onName(l.key, e.target.value, isLast)}
+                    onKeyDown={onCellEnter}
                     onFocus={() => setFocus({ row: idx, col: "name" })}
                     onBlur={() => setFocus((f) => (f?.row === idx && f.col === "name" ? null : f))}
                     placeholder={idx === 0 ? (isOut ? "Velvet, Board…" : "Ring Box, Tray…") : ""}
@@ -291,6 +305,7 @@ export function KarigarEntryModal({
                     value={l.size}
                     list={known ? sizeList : undefined}
                     onChange={(e) => patch(l.key, { size: e.target.value })}
+                    onKeyDown={onCellEnter}
                     onFocus={() => setFocus({ row: idx, col: "size" })}
                     onBlur={() => setFocus((f) => (f?.row === idx && f.col === "size" ? null : f))}
                     placeholder={idx === 0 ? (isOut ? "meter" : "2x3") : ""}
@@ -309,6 +324,7 @@ export function KarigarEntryModal({
                     value={l.design}
                     list={known ? designList : undefined}
                     onChange={(e) => patch(l.key, { design: e.target.value })}
+                    onKeyDown={onCellEnter}
                     onFocus={() => setFocus({ row: idx, col: "design" })}
                     onBlur={() => setFocus((f) => (f?.row === idx && f.col === "design" ? null : f))}
                     aria-label="Design"
@@ -326,7 +342,7 @@ export function KarigarEntryModal({
                     value={l.qty}
                     inputMode="decimal"
                     onChange={(e) => patch(l.key, { qty: e.target.value })}
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onQtyEnter(idx, isLast); } }}
+                    onKeyDown={onCellEnter}
                     onFocus={() => setFocus({ row: idx, col: "qty" })}
                     onBlur={() => setFocus((f) => (f?.row === idx && f.col === "qty" ? null : f))}
                     aria-label="Quantity"
@@ -357,7 +373,7 @@ export function KarigarEntryModal({
             <Icon.Plus /> Add {BLANK_ROWS} more
           </Button>
           <span className="text-xs text-muted">
-            Press <kbd className="rounded border border-border bg-surface px-1">Enter</kbd> in Quantity for the next line.
+            Press <kbd className="rounded border border-border bg-surface px-1">Enter</kbd> to move to the next box.
           </span>
         </div>
       </div>
