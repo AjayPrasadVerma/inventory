@@ -346,6 +346,14 @@
 .sheet-col-design { background: var(--sheet-design); }
 .sheet-col-qty    { background: var(--sheet-qty); }
 
+/* A row a save attempt rejected. Overrides the per-column tints, which is why it
+   is declared after them, and it beats the row-focus tint too — a rejected row
+   should stay red while it is being corrected. */
+[data-bad-row] > .sheet-cell-wrap,
+[data-bad-row] > .sheet-col-num {
+  background: var(--danger-tint);
+}
+
 /* ---- Spreadsheet cell ----
    The entry sheet should feel like typing into Excel, so the active cell lights
    up and its row dims in behind it.

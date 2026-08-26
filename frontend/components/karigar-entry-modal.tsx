@@ -10,6 +10,7 @@ import { DateField } from "@/components/ui/date-field";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/misc";
 import { Icon } from "@/components/icons";
+import { SheetSuggest } from "@/components/ui/sheet-suggest";
 
 export type Direction = "in" | "out";
 
@@ -44,6 +45,14 @@ const CELL_INPUT =
 type Focus = { row: number; col: string } | null;
 
 const MODES = ["Cash", "UPI", "Bank", "Cheque"];
+
+/** Keep only digits and a single decimal point. */
+function numeric(raw: string): string {
+  const cleaned = raw.replace(/[^\d.]/g, "");
+  const i = cleaned.indexOf(".");
+  if (i === -1) return cleaned;
+  return cleaned.slice(0, i + 1) + cleaned.slice(i + 1).replace(/\./g, "");
+}
 
 /** Marks the active cell. The look lives in globals.css under
  *  [data-active-cell] — see the note there for why it is not a utility. */
@@ -89,6 +98,9 @@ export function KarigarEntryModal({
   const [saving, setSaving] = useState(false);
   const gridRef = useRef<HTMLDivElement>(null);
   const [focus, setFocus] = useState<Focus>(null);
+  /** Rows a save attempt rejected. A toast alone leaves the owner hunting for
+   *  which of fourteen rows it meant. */
+  const [badRows, setBadRows] = useState<Set<number>>(() => new Set());
   const rowsRef = useRef<HTMLDivElement>(null);
 
   /**
@@ -118,6 +130,18 @@ export function KarigarEntryModal({
       .catch(() => setSuggestions([]));
   }, [direction]);
 
+  /** Every name for this direction, plus every size and design the shop has used —
+   *  the latter as a fallback until a row's name is recognised. */
+  const allNames = useMemo(() => suggestions.map((x) => x.name), [suggestions]);
+  const allSizes = useMemo(
+    () => [...new Set(suggestions.flatMap((x) => x.sizes))].sort(),
+    [suggestions],
+  );
+  const allDesigns = useMemo(
+    () => [...new Set(suggestions.flatMap((x) => x.designs))].sort(),
+    [suggestions],
+  );
+
   const byName = useMemo(() => {
     const m = new Map<string, Suggestion>();
     for (const s of suggestions) m.set(s.name.toLowerCase(), s);
@@ -126,6 +150,12 @@ export function KarigarEntryModal({
 
   function patch(key: number, p: Partial<Line>) {
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...p } : l)));
+    setBadRows((b) => {
+      if (!b.has(key)) return b;
+      const next = new Set(b);
+      next.delete(key);
+      return next;
+    });
   }
 
   /** Excel-like: filling the last row's name grows the sheet by one. */
@@ -165,17 +195,24 @@ export function KarigarEntryModal({
   const filled = lines.filter((l) => l.name.trim() && Number(l.qty) > 0);
 
   async function save() {
+    // A row with something in it but not everything is a typo, not an empty row —
+    // refuse rather than drop it silently, which would post an entry missing what
+    // the owner had typed. Every offending row is marked, not just the first.
+    const bad = new Set<number>();
+    lines.forEach((l) => {
+      const touched = !!(l.name.trim() || l.size.trim() || l.design.trim() || l.qty.trim());
+      if (touched && !(l.name.trim() && Number(l.qty) > 0)) bad.add(l.key);
+    });
+    if (bad.size > 0) {
+      setBadRows(bad);
+      toast("Every line that has anything in it needs a name and a quantity above 0", "error");
+      return;
+    }
     if (filled.length === 0) {
       toast("Add at least one line with a name and a quantity", "error");
       return;
     }
-    // A half-filled row is a typo, not an empty row — refuse rather than drop it
-    // silently, which would post an entry missing something the owner typed.
-    const partial = lines.find((l) => (l.name.trim() || l.qty.trim()) && !(l.name.trim() && Number(l.qty) > 0));
-    if (partial) {
-      toast("Every line needs both a name and a quantity", "error");
-      return;
-    }
+    setBadRows(new Set());
     setSaving(true);
     try {
       await api(`/karigars/${karigarId}/entries`, {
@@ -202,8 +239,6 @@ export function KarigarEntryModal({
     }
   }
 
-  const nameListId = `entry-names-${direction}`;
-
   return (
     <Modal
       open
@@ -224,12 +259,6 @@ export function KarigarEntryModal({
         </>
       )}
     >
-      {/* Every name the shop already knows, for this direction only. Typing
-          something new is allowed — that is what creates it. */}
-      <datalist id={nameListId}>
-        {suggestions.map((s) => <option key={s.name} value={s.name} />)}
-      </datalist>
-
       {/* First row: when, why, and any advance handed over at the same time. */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Field label="Date">
@@ -266,11 +295,10 @@ export function KarigarEntryModal({
           {lines.map((l, idx) => {
             const isLast = idx === lines.length - 1;
             const known = byName.get(l.name.trim().toLowerCase());
-            const sizeList = `sz-${l.key}`;
-            const designList = `dg-${l.key}`;
             return (
               <div
                 key={l.key}
+                data-bad-row={badRows.has(l.key) ? true : undefined}
                 className={`${GRID} group border-b border-border last:border-b-0 max-sm:gap-2 max-sm:px-3 max-sm:py-3 ${
                   focus?.row === idx ? "bg-[color:var(--surface-2)]" : ""
                 }`}
@@ -283,57 +311,47 @@ export function KarigarEntryModal({
                 </span>
 
                 <div className="sheet-cell-wrap sheet-col-item border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "name")} data-label="Item">
-                  <input
+                  <SheetSuggest
                     className={CELL_INPUT}
                     value={l.name}
-                    list={nameListId}
+                    options={allNames}
                     data-name-row={idx}
-                    onChange={(e) => onName(l.key, e.target.value, isLast)}
-                    onKeyDown={onCellEnter}
+                    onChange={(v) => onName(l.key, v, isLast)}
+                    onEnter={onCellEnter}
                     onFocus={() => setFocus({ row: idx, col: "name" })}
                     onBlur={() => setFocus((f) => (f?.row === idx && f.col === "name" ? null : f))}
                     placeholder={idx === 0 ? (isOut ? "Velvet, Board…" : "Ring Box, Tray…") : ""}
-                    aria-label={`Item for line ${idx + 1}`}
+                    ariaLabel={`Item for line ${idx + 1}`}
                   />
                 </div>
 
                 {/* Size and design suggest what this name has been recorded with
                     before, but never restrict it — a new size is just typed. */}
                 <div className="sheet-cell-wrap sheet-col-size border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "size")} data-label="Size">
-                  <input
+                  <SheetSuggest
                     className={CELL_INPUT}
                     value={l.size}
-                    list={known ? sizeList : undefined}
-                    onChange={(e) => patch(l.key, { size: e.target.value })}
-                    onKeyDown={onCellEnter}
+                    options={known?.sizes ?? allSizes}
+                    onChange={(v) => patch(l.key, { size: v })}
+                    onEnter={onCellEnter}
                     onFocus={() => setFocus({ row: idx, col: "size" })}
                     onBlur={() => setFocus((f) => (f?.row === idx && f.col === "size" ? null : f))}
                     placeholder={idx === 0 ? (isOut ? "meter" : "2x3") : ""}
-                    aria-label="Size"
+                    ariaLabel="Size"
                   />
-                  {known && (
-                    <datalist id={sizeList}>
-                      {known.sizes.map((v) => <option key={v} value={v} />)}
-                    </datalist>
-                  )}
                 </div>
 
                 <div className="sheet-cell-wrap sheet-col-design border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "design")} data-label="Design">
-                  <input
+                  <SheetSuggest
                     className={CELL_INPUT}
                     value={l.design}
-                    list={known ? designList : undefined}
-                    onChange={(e) => patch(l.key, { design: e.target.value })}
-                    onKeyDown={onCellEnter}
+                    options={known?.designs ?? allDesigns}
+                    onChange={(v) => patch(l.key, { design: v })}
+                    onEnter={onCellEnter}
                     onFocus={() => setFocus({ row: idx, col: "design" })}
                     onBlur={() => setFocus((f) => (f?.row === idx && f.col === "design" ? null : f))}
-                    aria-label="Design"
+                    ariaLabel="Design"
                   />
-                  {known && (
-                    <datalist id={designList}>
-                      {known.designs.map((v) => <option key={v} value={v} />)}
-                    </datalist>
-                  )}
                 </div>
 
                 <div className="sheet-cell-wrap sheet-col-qty border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "qty")} data-label="Quantity">
@@ -341,7 +359,7 @@ export function KarigarEntryModal({
                     className={`${CELL_INPUT} text-right sm:text-right`}
                     value={l.qty}
                     inputMode="decimal"
-                    onChange={(e) => patch(l.key, { qty: e.target.value })}
+                    onChange={(e) => patch(l.key, { qty: numeric(e.target.value) })}
                     onKeyDown={onCellEnter}
                     onFocus={() => setFocus({ row: idx, col: "qty" })}
                     onBlur={() => setFocus((f) => (f?.row === idx && f.col === "qty" ? null : f))}
