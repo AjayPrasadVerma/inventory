@@ -258,8 +258,11 @@
    about 1040px, so on a phone the whole payment side sat off-screen and the
    pairing the T exists to show was invisible. Each row becomes a card instead,
    purchase above and its payments below, which keeps the pairing vertically.
-   The tds carry their own labels since the header is gone. */
-@media (max-width: 767px) {
+   The tds carry their own labels since the header is gone.
+
+   Cut at 1024, not 768: the T needs ~1040px, so every tablet width below that
+   was getting the table and a horizontal scroll rather than the cards. */
+@media (max-width: 1023px) {
   .ledger-table,
   .ledger-table tbody,
   .ledger-table tfoot,
@@ -288,6 +291,36 @@
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--muted);
+  }
+}
+
+/* A sheet cell wrapper that is always a real box.
+   .row-cell uses display:contents so the control itself is the grid item, which
+   is right for a form but fatal for a sheet: an element with no box paints no
+   border, no background and no ring — which is exactly why the vertical rules
+   were missing from the body while the header had them, and why the active-cell
+   highlight never appeared even though getComputedStyle resolved it. */
+.sheet-cell-wrap {
+  min-width: 0;
+}
+
+@media (max-width: 639px) {
+  .sheet-cell-wrap {
+    display: grid;
+    grid-template-columns: 4.75rem minmax(0, 1fr);
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .sheet-cell-wrap[data-label]::before {
+    content: attr(data-label);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  .sheet-cell-wrap input {
+    text-align: left;
   }
 }
 

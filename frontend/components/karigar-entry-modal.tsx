@@ -19,14 +19,15 @@ interface Line { key: number; name: string; size: string; design: string; qty: s
 let seq = 0;
 const blank = (): Line => ({ key: ++seq, name: "", size: "", design: "", qty: "" });
 
-/** A sheet opens with room to type into, not one row and a button. */
+/** A sheet opens with room to type into, not one row and a button. This is the
+ *  floor; the sheet then grows to fill whatever height it actually has. */
 const BLANK_ROWS = 7;
-const blankRows = () => Array.from({ length: BLANK_ROWS }, blank);
+const blankRows = (n = BLANK_ROWS) => Array.from({ length: n }, blank);
 
 // Written out in full: Tailwind scans source text, so a class assembled from a
 // template literal is never emitted and the grid collapses to one column. No gap
 // — the cells butt against each other so their borders form the lattice.
-const GRID = "grid grid-cols-1 sm:grid-cols-[2.5rem_minmax(0,1fr)_9rem_9rem_7rem_2.5rem]";
+const GRID = "grid grid-cols-1 sm:grid-cols-[2.5rem_minmax(0,1fr)_7rem_9rem_6rem_2.5rem] xl:grid-cols-[2.5rem_minmax(0,1fr)_8rem_14rem_7rem_2.5rem]";
 
 /**
  * A spreadsheet cell, not a form field. The shared Input carries its own border,
@@ -88,6 +89,28 @@ export function KarigarEntryModal({
   const [saving, setSaving] = useState(false);
   const gridRef = useRef<HTMLDivElement>(null);
   const [focus, setFocus] = useState<Focus>(null);
+  const rowsRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Fill the sheet's height with real rows rather than leaving ruled paper
+   * stopping halfway down a tall panel. Rows are only ever added — never removed
+   * — so this can't delete something half-typed when the window shrinks.
+   */
+  useEffect(() => {
+    const box = rowsRef.current;
+    if (!box) return;
+    const fit = () => {
+      const row = box.firstElementChild as HTMLElement | null;
+      const rowH = row?.offsetHeight ?? 0;
+      if (rowH <= 0) return;
+      const want = Math.floor(box.clientHeight / rowH);
+      setLines((ls) => (ls.length >= want ? ls : [...ls, ...blankRows(want - ls.length)]));
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(box);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     api<{ data: Suggestion[] }>(`/karigars/suggest?direction=${direction}&q=`)
@@ -172,7 +195,8 @@ export function KarigarEntryModal({
     <Modal
       open
       onClose={onClose}
-      size="page"
+      size="sheet"
+      fill
       title={`${isOut ? "Material out" : "Item in"} — ${karigarName}`}
       footer={(close) => (
         <>
@@ -211,9 +235,9 @@ export function KarigarEntryModal({
         </Field>
       </div>
 
-      <div className="mt-5 overflow-hidden rounded-md border border-border-strong bg-surface">
+      <div className="mt-5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border-strong bg-surface">
         {/* Header reads as a sheet header: grey, tight, ruled off from the body. */}
-        <div className={`${GRID} hidden border-b border-border-strong bg-surface-2 text-[11px] font-semibold uppercase tracking-wide text-muted sm:grid`}>
+        <div className={`${GRID} hidden shrink-0 border-b border-border-strong bg-surface-2 text-[11px] font-semibold uppercase tracking-wide text-muted sm:grid`}>
           <span className="border-r border-border-strong px-2 py-1.5 text-center">#</span>
           <span className="border-r border-border-strong px-2 py-1.5">Item</span>
           <span className="border-r border-border-strong px-2 py-1.5">Size</span>
@@ -222,7 +246,10 @@ export function KarigarEntryModal({
           <span className="px-2 py-1.5" />
         </div>
 
-        <div ref={gridRef}>
+        <div
+          ref={(el) => { gridRef.current = el; rowsRef.current = el; }}
+          className="min-h-0 flex-1 overflow-y-auto"
+        >
           {lines.map((l, idx) => {
             const isLast = idx === lines.length - 1;
             const known = byName.get(l.name.trim().toLowerCase());
@@ -242,7 +269,7 @@ export function KarigarEntryModal({
                   <span className="sm:hidden">Line </span>{idx + 1}
                 </span>
 
-                <div className="row-cell border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "name")} data-label="Item">
+                <div className="sheet-cell-wrap border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "name")} data-label="Item">
                   <input
                     className={CELL_INPUT}
                     value={l.name}
@@ -258,7 +285,7 @@ export function KarigarEntryModal({
 
                 {/* Size and design suggest what this name has been recorded with
                     before, but never restrict it — a new size is just typed. */}
-                <div className="row-cell border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "size")} data-label="Size">
+                <div className="sheet-cell-wrap border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "size")} data-label="Size">
                   <input
                     className={CELL_INPUT}
                     value={l.size}
@@ -276,7 +303,7 @@ export function KarigarEntryModal({
                   )}
                 </div>
 
-                <div className="row-cell border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "design")} data-label="Design">
+                <div className="sheet-cell-wrap border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "design")} data-label="Design">
                   <input
                     className={CELL_INPUT}
                     value={l.design}
@@ -293,7 +320,7 @@ export function KarigarEntryModal({
                   )}
                 </div>
 
-                <div className="row-cell border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "qty")} data-label="Quantity">
+                <div className="sheet-cell-wrap border-r border-border max-sm:border-0" data-active-cell={activeCell(focus, idx, "qty")} data-label="Quantity">
                   <input
                     className={`${CELL_INPUT} text-right sm:text-right`}
                     value={l.qty}
@@ -325,7 +352,7 @@ export function KarigarEntryModal({
           })}
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t border-border-strong bg-surface-2 px-3 py-2">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border-strong bg-surface-2 px-3 py-2">
           <Button variant="outline" size="sm" onClick={() => setLines((ls) => [...ls, ...blankRows()])}>
             <Icon.Plus /> Add {BLANK_ROWS} more
           </Button>
