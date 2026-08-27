@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/page-parts";
 import { Icon } from "@/components/icons";
 import { VendorForm, type Vendor } from "@/components/vendor-form";
 import { PurchaseModal } from "@/components/purchase-modal";
+import { PurchaseSheetModal } from "@/components/purchase-sheet-modal";
 import { PayVendorModal } from "@/components/pay-vendor-modal";
 
 interface VendorLite { id: number; name: string; phone: string | null; city: string | null }
@@ -214,20 +215,17 @@ export default function VendorAccountPage() {
           <div className="mt-2 overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-xs)]">
             <div className="max-h-[calc(100vh-300px)] min-h-[16rem] overflow-auto">
               <table className="ledger-table w-full border-separate border-spacing-0 text-base lg:min-w-[1040px]">
+                {/* One header row, not two: the colour says which column is which,
+                    so a grouping strip above it is redundant. Money is indigo here
+                    exactly as it is on the karigar side. Items stays gold rather
+                    than green because a fully-paid bill turns its whole row green,
+                    and two greens next to each other would say nothing. */}
                 <thead className="sticky top-0 z-10">
-                  <tr>
-                    <th colSpan={3} className="border-b border-border-strong bg-surface-2 px-4 py-2.5 text-left text-sm font-semibold text-[color:var(--accent)]">
-                      Purchase
-                    </th>
-                    <th className="border-b border-l-2 border-border-strong border-l-border-strong bg-surface-2 px-4 py-2.5 text-left text-sm font-semibold text-[color:var(--success)]">
-                      Payment
-                    </th>
-                  </tr>
-                  <tr className="text-xs uppercase tracking-[0.09em] text-muted">
-                    <th className="w-24 whitespace-nowrap border-b border-border-strong bg-surface px-4 py-2 text-left font-semibold">Date</th>
-                    <th className="w-32 whitespace-nowrap border-b border-border-strong bg-surface px-4 py-2 text-left font-semibold">Bill No.</th>
-                    <th className="border-b border-border-strong bg-surface px-4 py-2 text-left font-semibold">Items</th>
-                    <th className="w-[38%] whitespace-nowrap border-b border-l-2 border-border-strong border-l-border-strong bg-surface px-4 py-2 text-left font-semibold">
+                  <tr className="text-sm uppercase tracking-[0.07em]">
+                    <th className="w-24 whitespace-nowrap border-b border-border-strong bg-surface-2 px-3 py-3 text-left font-bold text-muted">Date</th>
+                    <th className="w-32 whitespace-nowrap border-b border-border-strong bg-surface-2 px-3 py-3 text-left font-bold text-muted">Bill No.</th>
+                    <th className="khata-head-raw border-b border-l border-border-strong px-3 py-3 text-left font-bold">Items</th>
+                    <th className="khata-head-pay w-[38%] whitespace-nowrap border-b border-l border-border-strong px-3 py-3 text-left font-bold">
                       Total · paid · remaining
                     </th>
                   </tr>
@@ -236,7 +234,10 @@ export default function VendorAccountPage() {
                 <tbody>
                   {bills.map((b) => {
                     const settled = b.remaining <= 0 && b.total > 0;
-                    const cell = `border-b border-border-strong px-4 py-2.5 align-top max-lg:border-b-0 ${settled ? "bg-[color:var(--success-tint)]" : ""}`;
+                    // A fully-paid bill turns its whole row green — the owner asked
+                    // for that — so it is applied after the column tint and wins.
+                    const cell = `border-b border-border-strong px-3 py-2.5 align-top max-lg:border-b-0 ${settled ? "bg-[color:var(--success-tint)]" : ""}`;
+                    const tint = (col: string) => (settled ? cell : `${cell} ${col}`);
                     return (
                       <tr key={b.id}>
                         <td data-label="Date" className={`${cell} whitespace-nowrap font-mono text-sm font-semibold text-muted`}>{formatDate(b.date)}</td>
@@ -253,7 +254,7 @@ export default function VendorAccountPage() {
                             )}
                           </span>
                         </td>
-                        <td data-label="Items" className={`${cell} text-[15px] font-medium`}>
+                        <td data-label="Items" className={`${tint("khata-col-raw")} border-l border-border-strong text-[15px] font-medium max-lg:border-l-0`}>
                           {b.items.length === 0 ? <span className="text-muted">—</span> : (
                             <>
                               {b.items.length > 3 && (
@@ -278,7 +279,7 @@ export default function VendorAccountPage() {
                             </>
                           )}
                         </td>
-                        <td data-label="Payment" className={`border-b border-l-2 border-border-strong border-l-border-strong px-4 py-2.5 align-top max-lg:border-b-0 max-lg:border-l-0 max-lg:border-t-2 ${settled ? "bg-[color:var(--success-tint)]" : ""}`}>
+                        <td data-label="Payment" className={`${tint("khata-col-pay")} border-l border-border-strong max-lg:border-l-0 max-lg:border-t-2`}>
                           <MoneyBox
                             settled={settled}
                             total={b.total}
@@ -297,10 +298,10 @@ export default function VendorAccountPage() {
                     <tr key={`u${u.id}`}>
                       <td data-label="Date" className="border-b border-border-strong px-4 py-2.5 align-top font-mono text-sm font-semibold text-muted max-lg:border-b-0">{formatDate(u.date)}</td>
                       <td data-label="Bill no." className="border-b border-border-strong px-4 py-2.5 align-top font-mono text-[15px] font-semibold text-muted max-lg:border-b-0">—</td>
-                      <td data-label="Items" className="border-b border-border-strong px-4 py-2.5 align-top text-[15px] font-medium text-muted max-lg:border-b-0">
+                      <td data-label="Items" className="khata-col-raw border-b border-l border-border-strong px-3 py-2.5 align-top text-[15px] font-medium text-muted max-lg:border-b-0 max-lg:border-l-0">
                         On-account payment{u.note ? ` · ${u.note}` : ""}
                       </td>
-                      <td data-label="Payment" className="border-b border-l-2 border-border-strong border-l-border-strong px-4 py-2.5 align-top max-lg:border-b-0 max-lg:border-l-0 max-lg:border-t-2">
+                      <td data-label="Payment" className="khata-col-pay border-b border-l border-border-strong px-3 py-2.5 align-top max-lg:border-b-0 max-lg:border-l-0 max-lg:border-t-2">
                         <div className="w-full">
                           <PayRow line={{ id: u.id, date: u.date, method: u.method, amount: u.amount, advance: false }}
                             onDelete={isOwner ? () => setPendingDelete({ kind: "payment", id: u.id, label: `${rupees(u.amount)} on ${formatDate(u.date)}` }) : undefined} />
@@ -346,7 +347,18 @@ export default function VendorAccountPage() {
         />
       )}
 
-      {purchaseModal && vendor && (
+      {/* A new bill is typed as a sheet; editing an existing one still goes
+          through the id-based form, which can round-trip what it loaded. */}
+      {purchaseModal?.id === null && vendor && (
+        <PurchaseSheetModal
+          vendorId={vendor.id}
+          vendorName={vendor.name}
+          onClose={() => setPurchaseModal(null)}
+          onDone={() => { setPurchaseModal(null); refresh(); }}
+        />
+      )}
+
+      {purchaseModal && purchaseModal.id !== null && vendor && (
         <PurchaseModal
           vendorId={vendor.id}
           vendorName={vendor.name}

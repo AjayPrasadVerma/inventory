@@ -175,3 +175,73 @@ describe('line amount', () => {
     expect(Number(head.rows[0]!.total_amount)).toBe(260);
   });
 });
+
+describe('typed lines from the sheet', () => {
+  const nameCount = async (table: 'items' | 'products', name: string) =>
+    Number((await query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM ${table} WHERE lower(name) = lower($1)`, [name])).rows[0]!.n);
+
+  it('creates a raw material that does not exist yet and moves its stock', async () => {
+    expect(await nameCount('items', 'Sheet Board')).toBe(0);
+    const { id } = await purchasesRepo.create({
+      vendor_id: f.vendorId,
+      items: [{ name: 'Sheet Board', size: 'sheet', design: 'Grey', qty: 10, rate: 25 }],
+    });
+    expect(await nameCount('items', 'Sheet Board')).toBe(1);
+
+    const bill = (await purchasesRepo.findById(id))!;
+    expect(Number(bill.total_amount)).toBe(250);
+
+    // Size became the unit and design became the colour, so raw stock counts it
+    // the same way every other path does.
+    const mv = await query<{ unit: string; qty: string; reason: string }>(
+      `SELECT sm.unit, sm.qty, sm.reason FROM stock_movements sm
+       JOIN items i ON i.id = sm.item_id
+       WHERE lower(i.name) = 'sheet board'`);
+    expect(mv.rowCount).toBe(1);
+    expect(mv.rows[0]!.unit).toBe('sheet');
+    expect(Number(mv.rows[0]!.qty)).toBe(10);
+    expect(mv.rows[0]!.reason).toBe('purchase');
+  });
+
+  it('sends a name already in products to finished stock, not raw', async () => {
+    const before = await finishedOnHand(f.productId);
+    await purchasesRepo.create({
+      vendor_id: f.vendorId,
+      items: [{ name: 'Test Ring Box', size: 'Small', qty: 6, rate: 40 }],
+    });
+    expect(await finishedOnHand(f.productId)).toBe(before + 6);
+    // And nothing was created in items under that name.
+    expect(await nameCount('items', 'Test Ring Box')).toBe(0);
+  });
+
+  it('reuses an existing raw name whatever the case', async () => {
+    await purchasesRepo.create({
+      vendor_id: f.vendorId,
+      items: [{ name: 'test velvet', size: 'meter', design: 'Red', qty: 3, rate: 10 }],
+    });
+    expect(await nameCount('items', 'Test Velvet')).toBe(1);
+  });
+
+  it('derives the total from qty and rate, never from the caller', async () => {
+    const { id } = await purchasesRepo.create({
+      vendor_id: f.vendorId,
+      items: [
+        { name: 'Sheet Foam', size: 'sheet', qty: 4, rate: 12.5 },
+        { name: 'Sheet Foam', size: 'kilo', qty: 2, rate: 100 },
+      ],
+    });
+    const bill = (await purchasesRepo.findById(id))!;
+    expect(Number(bill.total_amount)).toBe(4 * 12.5 + 2 * 100);
+  });
+
+  it('leaves no catalogue row behind when the purchase fails', async () => {
+    // A negative quantity trips the DB CHECK after the catalogue row would have
+    // been created — the transaction has to take it back with everything else.
+    await expect(purchasesRepo.create({
+      vendor_id: f.vendorId,
+      items: [{ name: 'Never Committed', size: 'sheet', qty: -5, rate: 10 }],
+    })).rejects.toThrow();
+    expect(await nameCount('items', 'Never Committed')).toBe(0);
+  });
+});

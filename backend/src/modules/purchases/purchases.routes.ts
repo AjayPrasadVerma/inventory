@@ -5,7 +5,7 @@ import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { AppError, asyncHandler } from '../../utils/http.js';
 import { parseId, pastOrTodayDateSchema } from '../../utils/validation.js';
 import { assertCatalogueLines } from '../../utils/catalogue.js';
-import { purchasesRepo } from './purchases.repo.js';
+import { purchasesRepo, suggestPurchaseNames } from './purchases.repo.js';
 
 export const purchasesRouter = Router();
 purchasesRouter.use(requireAuth);
@@ -16,31 +16,50 @@ purchasesRouter.use(requireAuth);
  * that names neither (or both) before it reaches the DB's CHECK.
  */
 const purchaseItemSchema = z.object({
-  kind: z.enum(['item', 'product']).default('item'),
+  kind: z.enum(['item', 'product']).optional(),
   item_id: z.coerce.number().int().positive().optional().nullable(),
   product_id: z.coerce.number().int().positive().optional().nullable(),
   variant_id: z.coerce.number().int().positive().optional().nullable(),
-  unit: z.string().trim().min(1).max(30),
+  unit: z.string().trim().min(1).max(30).optional(),
   qty: z.coerce.number().positive('Quantity must be greater than 0').max(1_000_000),
   rate: z.coerce.number().nonnegative().max(1_000_000_000).default(0),
+
+  /** The sheet types a name; the repo resolves it and creates what is new. Size
+   *  carries the unit, as it does everywhere the owner types a line. */
+  name: z.string().trim().min(1).max(200).optional().nullable(),
+  size: z.string().trim().max(60).optional().nullable(),
+  design: z.string().trim().max(60).optional().nullable(),
   // No `amount` — it is qty × rate, derived server-side. Accepting it from the
   // client let a caller state a total that did not match its own line.
 }).refine(
-  (l) => (l.kind === 'product' ? l.product_id != null && l.item_id == null
-                               : l.item_id != null && l.product_id == null),
-  { message: 'Each line needs exactly one of item_id / product_id, matching its kind.' },
+  (l) => {
+    // A typed line carries its own name and needs no ids; an id line still has to
+    // name exactly one side, matching its kind.
+    if (l.name) return true;
+    if (!l.unit) return false;
+    const kind = l.kind ?? 'item';
+    return kind === 'product'
+      ? l.product_id != null && l.item_id == null
+      : l.item_id != null && l.product_id == null;
+  },
+  { message: 'Each line needs either a name, or a unit and exactly one of item_id / product_id matching its kind.' },
 );
 
 /** A purchase line reduced to what the catalogue check needs. */
 const toCatalogueLine = (l: {
-  kind: 'item' | 'product'; item_id?: number | null; product_id?: number | null;
-  variant_id?: number | null; unit: string;
+  kind?: 'item' | 'product'; item_id?: number | null; product_id?: number | null;
+  variant_id?: number | null; unit?: string;
 }) => ({
-  kind: l.kind,
-  id: (l.kind === 'product' ? l.product_id : l.item_id) as number,
+  kind: l.kind ?? 'item',
+  id: ((l.kind ?? 'item') === 'product' ? l.product_id : l.item_id) as number,
   variant_id: l.variant_id ?? null,
-  unit: l.unit,
+  unit: l.unit ?? '',
 });
+
+/** Only id lines need checking. A typed line has no ids yet, and the resolver
+ *  builds its unit and variant from the same catalogue, so it is consistent by
+ *  construction rather than by assertion. */
+const idLines = <T extends { name?: string | null }>(lines: T[]) => lines.filter((l) => !l.name);
 
 const purchaseSchema = z.object({
   vendor_id: z.coerce.number().int().positive('Select a vendor'),
@@ -77,6 +96,13 @@ purchasesRouter.get(
 );
 
 purchasesRouter.get(
+  '/suggest',
+  asyncHandler(async (_req, res) => {
+    res.json({ data: await suggestPurchaseNames() });
+  }),
+);
+
+purchasesRouter.get(
   '/:id',
   asyncHandler(async (req, res) => {
     const purchase = await purchasesRepo.findById(parseId(req.params.id));
@@ -89,7 +115,7 @@ purchasesRouter.post(
   '/',
   asyncHandler(async (req, res) => {
     const input = purchaseSchema.parse(req.body);
-    await assertCatalogueLines(input.items.map(toCatalogueLine));
+    await assertCatalogueLines(idLines(input.items).map(toCatalogueLine));
     const created = await purchasesRepo.create({ ...input, created_by: req.user?.id ?? null });
     res.status(201).json({ data: await purchasesRepo.findById(created.id) });
   }),
