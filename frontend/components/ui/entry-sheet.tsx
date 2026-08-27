@@ -195,7 +195,7 @@ export function EntrySheet({
                       // Derived, so it is shown rather than typed — and skipped by
                       // Enter, which only walks the boxes you can fill.
                       <span className={`block px-2 py-2 text-sm font-semibold tabular-nums text-ink ${c.align === "right" ? "sm:text-right" : ""}`}>
-                        {c.compute(row) || "—"}
+                        {c.compute(row)}
                       </span>
                     ) : opts ? (
                       <SheetSuggest

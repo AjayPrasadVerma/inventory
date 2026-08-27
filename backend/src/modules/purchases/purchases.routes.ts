@@ -5,7 +5,7 @@ import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { AppError, asyncHandler } from '../../utils/http.js';
 import { parseId, pastOrTodayDateSchema } from '../../utils/validation.js';
 import { assertCatalogueLines } from '../../utils/catalogue.js';
-import { purchasesRepo } from './purchases.repo.js';
+import { purchasesRepo, suggestPurchaseNames } from './purchases.repo.js';
 
 export const purchasesRouter = Router();
 purchasesRouter.use(requireAuth);
@@ -92,6 +92,13 @@ purchasesRouter.get(
       offset: (q.page - 1) * q.pageSize,
     });
     res.json({ data: rows, total, page: q.page, pageSize: q.pageSize });
+  }),
+);
+
+purchasesRouter.get(
+  '/suggest',
+  asyncHandler(async (_req, res) => {
+    res.json({ data: await suggestPurchaseNames() });
   }),
 );
 

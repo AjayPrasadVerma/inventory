@@ -356,3 +356,40 @@ export const purchasesRepo = {
     });
   },
 };
+
+/**
+ * What to offer in the purchase sheet's Item box. Both catalogues, because a
+ * vendor bill can carry raw material or a bought-in finished good, and the name
+ * is what decides which — so the owner needs to see both while typing.
+ */
+export async function suggestPurchaseNames(): Promise<
+  { name: string; kind: 'item' | 'product'; sizes: string[]; designs: string[] }[]
+> {
+  const raw = (await query<{ name: string; sizes: string[]; designs: string[] }>(
+    `SELECT i.name,
+            COALESCE(ARRAY_AGG(DISTINCT u.unit) FILTER (WHERE u.unit IS NOT NULL), '{}') AS sizes,
+            COALESCE(ARRAY_AGG(DISTINCT v.color) FILTER (WHERE v.color IS NOT NULL), '{}') AS designs
+     FROM items i
+     LEFT JOIN item_units u ON u.item_id = i.id
+     LEFT JOIN item_variants v ON v.item_id = i.id
+     WHERE i.is_active
+     GROUP BY i.id, i.name
+     ORDER BY lower(i.name)`,
+  )).rows;
+
+  const finished = (await query<{ name: string; sizes: string[]; designs: string[] }>(
+    `SELECT p.name,
+            COALESCE(ARRAY_AGG(DISTINCT pv.size) FILTER (WHERE pv.size IS NOT NULL), '{}') AS sizes,
+            COALESCE(ARRAY_AGG(DISTINCT pv.design) FILTER (WHERE pv.design IS NOT NULL), '{}') AS designs
+     FROM products p
+     LEFT JOIN product_variants pv ON pv.product_id = p.id
+     WHERE p.is_active
+     GROUP BY p.id, p.name
+     ORDER BY lower(p.name)`,
+  )).rows;
+
+  return [
+    ...raw.map((r) => ({ ...r, kind: 'item' as const })),
+    ...finished.map((r) => ({ ...r, kind: 'product' as const })),
+  ];
+}
