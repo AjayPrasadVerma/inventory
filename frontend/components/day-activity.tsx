@@ -20,7 +20,7 @@ interface Event {
   note: string | null;
 }
 interface Activity {
-  counts: Record<"purchases" | "issues" | "receipts" | "returns" | "payments" | "adjustments", number>;
+  counts: Record<"purchases" | "issues" | "receipts" | "payments" | "adjustments", number>;
   paid: number;
   events: Event[];
 }
@@ -35,8 +35,32 @@ const KIND: Record<Kind, { label: string; tone: string; icon: (p: React.SVGProps
   adjustment: { label: "Adjustment",      tone: "bg-surface-2 text-muted",                                    icon: Icon.Item },
 };
 
-/** Order the feed reads in: goods movements first, money after. */
-const ORDER: Kind[] = ["purchase", "issue", "receipt", "return", "adjustment", "payment"];
+/**
+ * Which of the three columns an event belongs in. The dashboard reads in the same
+ * language as a karigar's khata — green for what came in, gold for what went out,
+ * indigo for money — so the two screens do not have to be learned separately.
+ *
+ * A stock adjustment has no fixed side: it is filed by the sign of its quantity,
+ * because a correction that adds stock is an arrival and one that removes it is
+ * not.
+ */
+type Side = "in" | "out" | "pay";
+
+function sideOf(e: Event): Side {
+  if (e.kind === "payment") return "pay";
+  if (e.kind === "issue") return "out";
+  if (e.kind === "adjustment") {
+    return e.lines.some((l) => Number(l.qty) < 0) ? "out" : "in";
+  }
+  // purchase and receipt both bring things into the shop.
+  return "in";
+}
+
+const SIDES: { key: Side; label: string; head: string; body: string }[] = [
+  { key: "in", label: "In", head: "khata-head-in", body: "khata-col-in" },
+  { key: "out", label: "Out", head: "khata-head-raw", body: "khata-col-raw" },
+  { key: "pay", label: "Pay", head: "khata-head-pay", body: "khata-col-pay" },
+];
 
 function shiftDay(iso: string, days: number): string {
   const [y, m, d] = iso.split("-").map(Number);
@@ -72,13 +96,17 @@ export function DayActivity() {
   // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches the day's feed; state is set after await
   useEffect(() => { load(date); }, [date, load]);
 
-  const events = useMemo(() => {
-    const list = data?.events ?? [];
-    return [...list].sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind) || b.id - a.id);
+  const bySide = useMemo(() => {
+    const out: Record<Side, Event[]> = { in: [], out: [], pay: [] };
+    for (const e of data?.events ?? []) out[sideOf(e)].push(e);
+    // Newest first inside each column, matching the khata.
+    for (const k of Object.keys(out) as Side[]) out[k].sort((a, b) => b.id - a.id);
+    return out;
   }, [data]);
 
+  const total = (data?.events ?? []).length;
+
   const isToday = date === todayISO();
-  const total = events.length;
 
   return (
     <Card className="overflow-hidden">
@@ -133,42 +161,55 @@ export function DayActivity() {
           hint="Purchases, material issued to karigars, goods received and payments all show up here."
         />
       ) : (
-        <ul className="divide-y divide-border">
-          {events.map((e) => {
-            const k = KIND[e.kind];
-            const KIcon = k.icon;
-            return (
-              <li key={`${e.kind}-${e.id}`} className="flex items-start gap-3 px-4 py-2.5">
-                <span className={cn("mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg", k.tone)}>
-                  <KIcon className="h-4 w-4" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
-                    <span className={cn("rounded px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide", k.tone)}>
-                      {k.label}
-                    </span>
-                    {e.party && <span className="font-semibold text-ink">{e.party}</span>}
-                    <span className="text-xs text-muted">{e.ref}</span>
-                  </p>
-                  {e.lines.length > 0 && (
-                    <p className="mt-0.5 text-[13px] text-muted">
-                      {e.lines.map((l, i) => (
-                        <span key={i}>
-                          {i > 0 && ", "}
-                          <span className="text-ink">{l.name}</span>
-                          {l.variant ? ` (${l.variant})` : ""} · {fmtQty(l.qty)} {l.unit}
-                        </span>
-                      ))}
-                    </p>
-                  )}
-                </div>
-                {e.amount != null && (
-                  <span className="shrink-0 font-mono text-sm font-semibold tabular-nums text-ink">{rupees(e.amount)}</span>
+        <div className="grid grid-cols-1 md:grid-cols-3">
+          {SIDES.map((side, i) => (
+            <div
+              key={side.key}
+              className={`min-w-0 ${i > 0 ? "border-t border-border md:border-l md:border-t-0" : ""}`}
+            >
+              <div className={`${side.head} flex items-baseline justify-between border-b border-border-strong px-4 py-2 text-sm font-bold uppercase tracking-[0.07em]`}>
+                {side.label}
+                <span className="text-xs tabular-nums opacity-80">{bySide[side.key].length}</span>
+              </div>
+
+              <div className={`${side.body} h-full`}>
+                {bySide[side.key].length === 0 ? (
+                  <p className="px-4 py-6 text-center text-[13px] text-muted">Nothing</p>
+                ) : (
+                  <ul className="divide-y divide-border">
+                    {bySide[side.key].map((e) => (
+                      <li key={`${e.kind}-${e.id}`} className="px-4 py-2.5">
+                        <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                          <span className={cn("rounded px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide", KIND[e.kind].tone)}>
+                            {KIND[e.kind].label}
+                          </span>
+                          {e.party && <span className="font-semibold text-ink">{e.party}</span>}
+                          {e.amount != null && (
+                            <span className="ml-auto font-mono text-sm font-semibold tabular-nums text-ink">
+                              {rupees(e.amount)}
+                            </span>
+                          )}
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted">{e.ref}</p>
+                        {e.lines.length > 0 && (
+                          <p className="mt-0.5 text-[13px] text-muted">
+                            {e.lines.map((l, li) => (
+                              <span key={li}>
+                                {li > 0 && ", "}
+                                <span className="text-ink">{l.name}</span>
+                                {l.variant ? ` (${l.variant})` : ""} · {fmtQty(l.qty)} {l.unit}
+                              </span>
+                            ))}
+                          </p>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
                 )}
-              </li>
-            );
-          })}
-        </ul>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </Card>
   );

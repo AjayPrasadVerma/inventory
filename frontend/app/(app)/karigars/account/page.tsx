@@ -134,18 +134,14 @@ export default function KarigarAccountPage() {
         .join(" ").toLowerCase().includes(term));
   }, [log, term]);
 
-  // Each column is its own stack, oldest first so the newest sits at its bottom.
-  // The API returns newest first because that is what a log wants; the columns
-  // read the other way because the owner fills them downward.
-  const oldestFirst = useMemo(() => [...entries].reverse(), [entries]);
-  const ins = useMemo(() => oldestFirst.filter((e) => e.direction === "in"), [oldestFirst]);
-  const outs = useMemo(() => oldestFirst.filter((e) => e.direction === "out"), [oldestFirst]);
+  // Newest at the top of every column. The API already returns the log that way;
+  // this used to reverse it so a column read like a page being filled downward,
+  // but what the owner actually opens the khata for is the entry just made.
+  const ins = useMemo(() => entries.filter((e) => e.direction === "in"), [entries]);
+  const outs = useMemo(() => entries.filter((e) => e.direction === "out"), [entries]);
   // Money is its own stack: a payment attached to a movement and a lump sum with
   // no movement both belong here, and neither should appear twice.
-  const money = useMemo(
-    () => oldestFirst.flatMap((e) => e.payments),
-    [oldestFirst],
-  );
+  const money = useMemo(() => entries.flatMap((e) => e.payments), [entries]);
 
   const hasFilter = !!from || !!to || !!search;
   const paidShown = money.reduce((n, p) => n + p.amount, 0);
