@@ -36,6 +36,9 @@ export interface SheetColumn {
   numeric?: boolean;
   /** Derived and read-only, e.g. an amount from qty × rate. */
   compute?: (row: SheetRow) => string;
+  /** Shown but not typeable — a value that belongs to the record, not the row.
+   *  Enter walks past it, since it is not a box you can fill. */
+  readOnly?: boolean;
 }
 
 const CELL_INPUT =
@@ -191,7 +194,9 @@ export function EntrySheet({
                     data-active-cell={active ? true : undefined}
                     data-label={c.label}
                   >
-                    {c.compute ? (
+                    {c.readOnly ? (
+                      <span className="block truncate px-2 py-2 text-sm font-medium text-ink">{value}</span>
+                    ) : c.compute ? (
                       // Derived, so it is shown rather than typed — and skipped by
                       // Enter, which only walks the boxes you can fill.
                       <span className={`block px-2 py-2 text-sm font-semibold tabular-nums text-ink ${c.align === "right" ? "sm:text-right" : ""}`}>

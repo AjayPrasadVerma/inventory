@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { asyncHandler } from '../../utils/http.js';
 import { parseId, pastOrTodayDateSchema } from '../../utils/validation.js';
 import {
@@ -29,14 +29,16 @@ const listSchema = z.object({
  */
 /** Editing sends the same shape, plus which record it is. Quantity here means
  *  "make the stock this" — see editCatalogueFromSheet. */
+/** Which catalogue the path is addressing. */
+const kindParam = z.enum(['item', 'product']);
+
 const editSheetSchema = z.object({
-  kind: z.enum(['item', 'product']),
   name: z.string().trim().min(1, 'Name is required').max(200),
   on_date: pastOrTodayDateSchema.optional().nullable(),
   lines: z.array(z.object({
     size: z.string().trim().max(60).optional().nullable(),
     design: z.string().trim().max(60).optional().nullable(),
-    qty: z.coerce.number().nonnegative().max(1_000_000).optional().nullable(),
+    qty: z.coerce.number().min(-1_000_000).max(1_000_000).optional().nullable(),
   })).max(200, 'Too many lines').default([]),
 });
 
@@ -80,22 +82,27 @@ catalogueRouter.post(
 );
 
 catalogueRouter.put(
-  '/:id/sheet',
+  '/:kind/:id/sheet',
   asyncHandler(async (req, res) => {
+    const kind = kindParam.parse(req.params.kind);
     const input = editSheetSchema.parse(req.body);
-    const out = await editCatalogueFromSheet({ ...input, id: parseId(req.params.id) });
+    const out = await editCatalogueFromSheet({ ...input, kind, id: parseId(req.params.id) });
     res.json({ data: out });
   }),
 );
 
 catalogueRouter.put(
-  '/:id/kind',
+  '/:kind/:id/convert',
+  // Owner-only: this is the one route here that deletes rather than hides, and
+  // it takes a record's whole stock ledger with it.
+  requireRole('owner'),
   asyncHandler(async (req, res) => {
     const input = z.object({
-      from: z.enum(['item', 'product']),
       on_date: pastOrTodayDateSchema.optional().nullable(),
     }).parse(req.body);
-    const out = await convertCatalogueKind({ ...input, id: parseId(req.params.id) });
+    const out = await convertCatalogueKind({
+      ...input, from: kindParam.parse(req.params.kind), id: parseId(req.params.id),
+    });
     res.json({ data: out });
   }),
 );

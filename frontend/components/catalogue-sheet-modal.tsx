@@ -118,7 +118,9 @@ export function CatalogueSheetModal({
   const isRaw = kind === "item";
 
   const columns: SheetColumn[] = useMemo(() => [
-    { field: "name", label: "Item", tint: "item", options: () => allNames,
+    { field: "name", label: "Item", tint: "item",
+      readOnly: editing,
+      options: editing ? undefined : () => allNames,
       placeholder: isRaw ? "Velvet, Board…" : "Ring Box, Tray…" },
     { field: "size", label: "Size", tint: "size",
       options: (r) => byName.get(String(r.name).trim().toLowerCase())?.sizes ?? allSizes,
@@ -126,25 +128,29 @@ export function CatalogueSheetModal({
     { field: "design", label: "Design", tint: "design",
       options: (r) => byName.get(String(r.name).trim().toLowerCase())?.designs ?? allDesigns },
     { field: "qty", label: "Quantity", tint: "qty", numeric: true, align: "right" },
-  ], [allNames, allSizes, allDesigns, byName, isRaw]);
+  ], [allNames, allSizes, allDesigns, byName, isRaw, editing]);
 
-  const named = lines.filter((l) => String(l.name).trim());
+  const named = editing
+    ? lines.filter((l) => ["size", "design", "qty"].some((f) => String(l[f] ?? "").trim()))
+    : lines.filter((l) => String(l.name).trim());
 
   async function save() {
     // A row with a size or a quantity but no name is a typo, not an empty row.
     // Quantity itself is optional here — a thing can be stocked before any of it
     // is in hand — so only the name is required.
     const bad = new Set<number>();
-    lines.forEach((l) => {
-      const touched = ["name", "size", "design", "qty"].some((f) => String(l[f] ?? "").trim());
-      if (touched && !String(l.name).trim()) bad.add(l.key);
-    });
-    if (bad.size > 0) {
-      setBadRows(bad);
-      toast("Every line that has anything in it needs a name", "error");
-      return;
+    if (!editing) {
+      lines.forEach((l) => {
+        const touched = ["name", "size", "design", "qty"].some((f) => String(l[f] ?? "").trim());
+        if (touched && !String(l.name).trim()) bad.add(l.key);
+      });
+      if (bad.size > 0) {
+        setBadRows(bad);
+        toast("Every line that has anything in it needs a name", "error");
+        return;
+      }
     }
-    if (named.length === 0) {
+    if (!editing && named.length === 0) {
       toast("Add at least one line with a name", "error");
       return;
     }
@@ -156,19 +162,18 @@ export function CatalogueSheetModal({
       // record in its new home.
       let targetId = record?.id ?? 0;
       if (editing && kind !== record.kind) {
-        const moved = await api<{ data: { id: number } }>(`/catalogue/${record.id}/kind`, {
-          method: "PUT",
-          body: { from: record.kind, on_date: date },
-        });
+        const moved = await api<{ data: { id: number } }>(
+          `/catalogue/${record.kind}/${record.id}/convert`,
+          { method: "PUT", body: { on_date: date } },
+        );
         targetId = moved.data.id;
       }
 
       if (editing) {
-        await api(`/catalogue/${targetId}/sheet`, {
+        await api(`/catalogue/${kind}/${targetId}/sheet`, {
           method: "PUT",
           body: {
-            kind,
-            name: String(named[0]!.name).trim(),
+            name: record.name,
             on_date: date,
             lines: named.map((l) => ({
               size: String(l.size).trim() || null,

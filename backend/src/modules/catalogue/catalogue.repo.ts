@@ -1,6 +1,8 @@
 import { query, withTransaction } from '../../config/db.js';
 import { AppError } from '../../utils/http.js';
-import { resolveFinishedLine, resolveRawLine } from '../../utils/catalogue-resolve.js';
+import {
+  resolveFinishedLine, resolveFinishedParts, resolveRawLine, resolveRawParts,
+} from '../../utils/catalogue-resolve.js';
 
 /**
  * One catalogue, two kinds of thing.
@@ -74,11 +76,12 @@ const PRODUCT_SIDE = `
            SELECT json_agg(json_build_object('size', x.size, 'design', x.design, 'qty', x.qty)
                            ORDER BY x.first_seen)
            FROM (
-             SELECT pv.size, pv.design, SUM(f.qty)::float8 AS qty, MIN(f.id) AS first_seen
+             SELECT MIN(pv.size) AS size, MIN(pv.design) AS design,
+                    SUM(f.qty)::float8 AS qty, MIN(f.id) AS first_seen
              FROM finished_stock_movements f
              LEFT JOIN product_variants pv ON pv.id = f.variant_id
              WHERE f.product_id = p.id
-             GROUP BY pv.size, pv.design
+             GROUP BY f.variant_id
            ) x
          ), '[]'::json) AS variant_rows,
          json_build_array(json_build_object(
@@ -209,8 +212,9 @@ export async function addCatalogueLines(input: {
  * difference is booked as one adjustment. Re-adding the number outright would
  * double the stock every time the form was opened and saved.
  *
- * A variant that disappears from the sheet is dropped from the catalogue, but its
- * movements are left alone — history is not the owner's to lose by editing a row.
+ * A row removed from the sheet arrives here as that bucket set to zero, not as a
+ * deletion: the size and design stay in the catalogue and every movement stays in
+ * the ledger. History is not the owner's to lose by clearing a line.
  */
 export async function editCatalogueFromSheet(input: {
   kind: 'item' | 'product';
@@ -220,7 +224,14 @@ export async function editCatalogueFromSheet(input: {
   lines: { size?: string | null; design?: string | null; qty?: number | null }[];
 }): Promise<{ adjusted: number }> {
   return withTransaction(async (client) => {
-    const table = input.kind === 'item' ? 'items' : 'products';
+    // The kind has to come from the caller and cannot be worked out from the id:
+    // items and products are separate sequences, so one id routinely exists in
+    // both. Deriving it by checking one table first looked safer and was worse —
+    // it silently renamed whichever record that table happened to hold. It is in
+    // the URL rather than the body so it travels with the record being addressed.
+    const kind = input.kind;
+    const table = kind === 'item' ? 'items' : 'products';
+
     const name = input.name.trim();
     if (!name) throw new AppError(400, 'Name is required');
 
@@ -230,10 +241,10 @@ export async function editCatalogueFromSheet(input: {
     // A rename must not collide with something already in the same catalogue, or
     // two rows would answer to one name and the sheet could not tell them apart.
     const clash = await client.query(
-      `SELECT 1 FROM ${table} WHERE lower(name) = lower($1) AND id <> $2`,
+      `SELECT 1 FROM ${table} WHERE lower(name) = lower($1) AND id <> $2 AND is_active`,
       [name, input.id],
     );
-    if (clash.rowCount) throw new AppError(409, `Another ${input.kind === 'item' ? 'material' : 'product'} is already called "${name}"`);
+    if (clash.rowCount) throw new AppError(409, `Another ${kind === 'item' ? 'material' : 'product'} is already called "${name}"`);
 
     await client.query(`UPDATE ${table} SET name = $2, updated_at = now() WHERE id = $1`, [input.id, name]);
 
@@ -242,9 +253,13 @@ export async function editCatalogueFromSheet(input: {
       const size = (line.size ?? '').trim();
       const design = (line.design ?? '').trim();
       const qty = line.qty == null ? null : Number(line.qty);
-      if (qty != null && qty < 0) throw new AppError(400, 'Quantity cannot be negative');
+      // Negative is allowed on edit: a record can genuinely be oversold, the list
+      // paints it red, and the sheet has to be able to hand back what it showed.
 
-      if (input.kind === 'item') {
+      if (kind === 'item') {
+        // Nothing to do for a line that names no size and sets no quantity —
+        // creating a 'pcs' unit here added one the owner never typed.
+        if (!size && qty == null) continue;
         const unit = size || 'pcs';
         await client.query(
           `INSERT INTO item_units (item_id, unit) VALUES ($1,$2) ON CONFLICT (item_id, unit) DO NOTHING`,
@@ -263,7 +278,7 @@ export async function editCatalogueFromSheet(input: {
           `SELECT SUM(qty)::text AS q FROM stock_movements
            WHERE item_id = $1 AND unit = $2 AND variant_id IS NOT DISTINCT FROM $3`,
           [input.id, unit, variantId])).rows[0]?.q ?? 0);
-        const delta = qty - cur;
+        const delta = Number((qty - cur).toFixed(3));
         if (delta !== 0) {
           await client.query(
             `INSERT INTO stock_movements (item_id, variant_id, unit, qty, reason, moved_on, note)
@@ -292,7 +307,7 @@ export async function editCatalogueFromSheet(input: {
           `SELECT SUM(qty)::text AS q FROM finished_stock_movements
            WHERE product_id = $1 AND variant_id IS NOT DISTINCT FROM $2`,
           [input.id, variantId])).rows[0]?.q ?? 0);
-        const delta = qty - cur;
+        const delta = Number((qty - cur).toFixed(3));
         if (delta !== 0) {
           await client.query(
             `INSERT INTO finished_stock_movements (product_id, variant_id, qty, reason, moved_on, note)
@@ -331,8 +346,11 @@ export async function convertCatalogueKind(input: {
   on_date?: string | null;
 }): Promise<{ id: number; kind: 'item' | 'product' }> {
   return withTransaction(async (client) => {
-    const toKind = input.from === 'item' ? 'product' : 'item';
-    const fromTable = input.from === 'item' ? 'items' : 'products';
+    // See editCatalogueFromSheet: the id alone does not say which catalogue, so
+    // this comes from the URL and the lookup below is what rejects a wrong one.
+    const from = input.from;
+    const toKind = from === 'item' ? 'product' : 'item';
+    const fromTable = from === 'item' ? 'items' : 'products';
 
     const rec = await client.query<{ name: string; category: string | null; low_stock_qty: string | null; notes: string | null }>(
       `SELECT name, category, low_stock_qty, notes FROM ${fromTable} WHERE id = $1`, [input.id]);
@@ -340,20 +358,32 @@ export async function convertCatalogueKind(input: {
     const r = rec.rows[0]!;
 
     // Anything that points at this record by id and is not its own stock.
-    const idCol = input.from === 'item' ? 'item_id' : 'product_id';
-    const users: [string, string][] = input.from === 'item'
+    const idCol = from === 'item' ? 'item_id' : 'product_id';
+    const users: [string, string][] = from === 'item'
       ? [['karigar_entry_lines', 'karigar_entry_lines'], ['purchase_items', 'purchase_items'], ['job_issues', 'job_issues']]
       : [['karigar_entry_lines', 'karigar_entry_lines'], ['purchase_items', 'purchase_items'], ['job_receipts', 'job_receipts'], ['sale_items', 'sale_items']];
-    for (const [table] of users) {
-      const used = await client.query(`SELECT 1 FROM ${table} WHERE ${idCol} = $1 LIMIT 1`, [input.id]);
-      if (used.rowCount) {
-        throw new AppError(409,
-          'This is already used in a recorded entry, so its type cannot be changed. Add it under the other type and use that from now on.');
+    const inUse = async () => {
+      for (const [table] of users) {
+        const used = await client.query(`SELECT 1 FROM ${table} WHERE ${idCol} = $1 LIMIT 1`, [input.id]);
+        if (used.rowCount) return true;
       }
+      // Anything that is not an adjustment came from a document, whether or not
+      // that document left a line behind — returned material writes a movement
+      // and no job_issues row, so a table allowlist alone let it through.
+      const moved = from === 'item'
+        ? await client.query(
+            `SELECT 1 FROM stock_movements WHERE item_id = $1 AND reason <> 'adjustment' LIMIT 1`, [input.id])
+        : await client.query(
+            `SELECT 1 FROM finished_stock_movements WHERE product_id = $1 AND reason <> 'adjustment' LIMIT 1`, [input.id]);
+      return (moved.rowCount ?? 0) > 0;
+    };
+    if (await inUse()) {
+      throw new AppError(409,
+        'This is already used in a recorded entry, so its type cannot be changed. Add it under the other type and use that from now on.');
     }
 
     // The buckets it currently holds, so they can be re-made on the other side.
-    const buckets = input.from === 'item'
+    const buckets = from === 'item'
       ? (await client.query<{ size: string | null; design: string | null; qty: string }>(
           `SELECT sm.unit AS size, iv.color AS design, SUM(sm.qty)::text AS qty
            FROM stock_movements sm LEFT JOIN item_variants iv ON iv.id = sm.variant_id
@@ -364,6 +394,17 @@ export async function convertCatalogueKind(input: {
            WHERE f.product_id = $1 GROUP BY pv.size, pv.design ORDER BY MIN(f.id)`, [input.id])).rows;
 
     const toTable = toKind === 'item' ? 'items' : 'products';
+
+    // Without this the convert created a second row under the same name, and the
+    // stock then resolved onto whichever one the lookup happened to return —
+    // merging it into an unrelated record and leaving an empty duplicate behind.
+    const taken = await client.query(
+      `SELECT 1 FROM ${toTable} WHERE lower(name) = lower($1) AND is_active LIMIT 1`, [r.name]);
+    if (taken.rowCount) {
+      throw new AppError(409,
+        `A ${toKind === 'item' ? 'raw material' : 'finished product'} called "${r.name}" already exists. Rename one of them first.`);
+    }
+
     const made = await client.query<{ id: number }>(
       `INSERT INTO ${toTable} (name, category, low_stock_qty, notes) VALUES ($1,$2,$3,$4) RETURNING id`,
       [r.name, r.category, r.low_stock_qty, r.notes]);
@@ -374,27 +415,27 @@ export async function convertCatalogueKind(input: {
       const size = (b.size ?? '').trim();
       const design = (b.design ?? '').trim();
       if (toKind === 'item') {
-        const { itemId, unit, variantId } = await resolveRawLine(client, { name: r.name, size, design });
+        const { unit, variantId } = await resolveRawParts(client, newId, { size, design });
         if (qty !== 0) {
           await client.query(
             `INSERT INTO stock_movements (item_id, variant_id, unit, qty, reason, moved_on, note)
              VALUES ($1,$2,$3,$4,'adjustment', COALESCE($5, CURRENT_DATE), 'Type changed')`,
-            [itemId, variantId, unit, qty, input.on_date ?? null]);
+            [newId, variantId, unit, qty, input.on_date ?? null]);
         }
       } else {
-        const { productId, variantId } = await resolveFinishedLine(client, { name: r.name, size, design });
+        const { variantId } = await resolveFinishedParts(client, newId, { size, design });
         if (qty !== 0) {
           await client.query(
             `INSERT INTO finished_stock_movements (product_id, variant_id, qty, reason, moved_on, note)
              VALUES ($1,$2,$3,'adjustment', COALESCE($4, CURRENT_DATE), 'Type changed')`,
-            [productId, variantId, qty, input.on_date ?? null]);
+            [newId, variantId, qty, input.on_date ?? null]);
         }
       }
     }
 
     // The old record and its stock go, now that both are re-made on the other
     // side — leaving them would double the shop's count of the same things.
-    if (input.from === 'item') {
+    if (from === 'item') {
       await client.query(`DELETE FROM stock_movements WHERE item_id = $1`, [input.id]);
       await client.query(`DELETE FROM item_units WHERE item_id = $1`, [input.id]);
       await client.query(`DELETE FROM item_variants WHERE item_id = $1`, [input.id]);
