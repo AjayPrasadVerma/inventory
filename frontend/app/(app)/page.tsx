@@ -7,6 +7,8 @@ import { qty as fmtQty } from "@/lib/utils";
 import { Badge, Card, Spinner } from "@/components/ui/misc";
 import { Icon } from "@/components/icons";
 import { DayActivity } from "@/components/day-activity";
+import { KarigarEntryModal } from "@/components/karigar-entry-modal";
+import { PaymentModal } from "@/components/payment-modal";
 
 type Tone = "primary" | "accent" | "success" | "warning" | "danger" | "info";
 const TINT: Record<Tone, { bg: string; fg: string }> = {
@@ -43,6 +45,10 @@ interface AttnItem { kind: "Raw" | "Finished"; name: string; sub: string; on_han
 
 export default function DashboardPage() {
   const [data, setData] = useState<Dashboard | null>(null);
+  /** Which of the three actions is open. The dashboard has no party in its URL,
+   *  so each form asks for one itself rather than putting a dialog in front of
+   *  the form the owner actually wanted. */
+  const [action, setAction] = useState<"in" | "out" | "pay" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -54,6 +60,11 @@ export default function DashboardPage() {
       .catch((e) => setError((e as Error).message))
       .finally(() => setLoading(false));
   }, []);
+
+  /** Bumped after a save so the day's feed refetches rather than showing a day
+   *  that no longer matches what was just recorded. */
+  const [reloadKey, setReloadKey] = useState(0);
+  const done = () => { setAction(null); setReloadKey((n) => n + 1); };
 
   const finishedTotal = data?.finishedTotal ?? 0;
   const rawLines = useMemo(() => (data?.rawByCategory ?? []).reduce((s, r) => s + r.value, 0), [data]);
@@ -85,8 +96,16 @@ export default function DashboardPage() {
             <Hero label="Open Jobs" value={data?.openJobs ?? 0} hint="Material out with karigars" icon={<Icon.Job />} tone="info" href="/karigars" />
           </div>
 
+          {/* The same three actions as a khata, so recording something does not
+              mean navigating to find the record first. */}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <ActionButton label="In" hint="Goods received from a karigar" head="khata-head-in" onClick={() => setAction("in")} />
+            <ActionButton label="Out" hint="Material issued to a karigar" head="khata-head-raw" onClick={() => setAction("out")} />
+            <ActionButton label="Pay" hint="Pay a karigar or a vendor" head="khata-head-pay" onClick={() => setAction("pay")} />
+          </div>
+
           {/* What happened on a given day — the detail behind the KPIs above. */}
-          <DayActivity />
+          <DayActivity key={reloadKey} />
 
           {/* Needs attention — the actionable list */}
           <AttentionList items={attention} />
@@ -101,7 +120,39 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {(action === "in" || action === "out") && (
+        <KarigarEntryModal
+          direction={action}
+          onClose={() => setAction(null)}
+          onDone={done}
+        />
+      )}
+
+      {action === "pay" && (
+        <PaymentModal onClose={() => setAction(null)} onDone={done} />
+      )}
     </div>
+  );
+}
+
+/** One of the three khata actions, wearing that column's colour. */
+function ActionButton({
+  label, hint, head, onClick,
+}: {
+  label: string; hint: string; head: string; onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`${head} flex cursor-pointer items-center gap-3 rounded-xl border border-border-strong px-4 py-3 text-left transition-opacity hover:opacity-90`}
+    >
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-surface/70 text-lg font-bold">+</span>
+      <span className="min-w-0">
+        <span className="block text-base font-bold uppercase tracking-[0.06em]">{label}</span>
+        <span className="block truncate text-xs font-medium opacity-80">{hint}</span>
+      </span>
+    </button>
   );
 }
 

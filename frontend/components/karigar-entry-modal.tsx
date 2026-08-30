@@ -6,6 +6,8 @@ import { todayISO } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
+import { Combobox, type ComboOption } from "@/components/ui/combobox";
+import { cachedGet } from "@/lib/cache";
 import { DateField } from "@/components/ui/date-field";
 import { Modal } from "@/components/ui/modal";
 import { Spinner } from "@/components/ui/misc";
@@ -34,14 +36,32 @@ export function KarigarEntryModal({
   onClose,
   onDone,
 }: {
-  karigarId: number;
-  karigarName: string;
+  /** Omitted when opened from the dashboard, where no karigar is in the URL —
+   *  the form asks for one itself rather than making the owner answer a separate
+   *  dialog before the form they wanted appears. */
+  karigarId?: number | null;
+  karigarName?: string;
   direction: Direction;
   onClose: () => void;
   onDone: () => void;
 }) {
   const { toast } = useToast();
   const isOut = direction === "out";
+  const needsKarigar = karigarId == null;
+
+  const [pickedId, setPickedId] = useState("");
+  const [options, setOptions] = useState<ComboOption[]>([]);
+  useEffect(() => {
+    if (!needsKarigar) return;
+    cachedGet<{ data: { id: number; name: string; phone: string | null }[] }>("/karigars/options")
+      .then((r) => setOptions(r.data.map((k) => ({
+        value: String(k.id), label: k.name, sublabel: k.phone || undefined,
+      }))))
+      .catch(() => setOptions([]));
+  }, [needsKarigar]);
+
+  const activeId = karigarId ?? (pickedId ? Number(pickedId) : null);
+  const activeName = karigarName ?? options.find((o) => o.value === pickedId)?.label ?? "";
 
   const [date, setDate] = useState(todayISO());
   const [remark, setRemark] = useState("");
@@ -113,10 +133,14 @@ export function KarigarEntryModal({
       toast("Add at least one line with a name and a quantity", "error");
       return;
     }
+    if (activeId == null) {
+      toast("Choose a karigar first", "error");
+      return;
+    }
     setBadRows(new Set());
     setSaving(true);
     try {
-      await api(`/karigars/${karigarId}/entries`, {
+      await api(`/karigars/${activeId}/entries`, {
         method: "POST",
         body: {
           direction,
@@ -146,7 +170,7 @@ export function KarigarEntryModal({
       onClose={onClose}
       size="sheet"
       fill
-      title={`${isOut ? "Material out" : "Item in"} — ${karigarName}`}
+      title={activeName ? `${isOut ? "Material out" : "Item in"} — ${activeName}` : (isOut ? "Material out" : "Item in")}
       footer={(close) => (
         <>
           <span className="mr-auto text-sm text-muted">
@@ -154,14 +178,26 @@ export function KarigarEntryModal({
             {filled.length === 1 ? "line" : "lines"}
           </span>
           <Button variant="outline" onClick={close} disabled={saving}>Cancel</Button>
-          <Button onClick={save} disabled={saving}>
+          <Button onClick={save} disabled={saving || activeId == null}>
             {saving ? <Spinner /> : isOut ? "Save out" : "Save in"}
           </Button>
         </>
       )}
     >
-      {/* First row: when, why, and any advance handed over at the same time. */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {/* First row: who, when, why, and any advance handed over at the same time. */}
+      <div className={`grid gap-3 sm:grid-cols-2 ${needsKarigar ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
+        {needsKarigar && (
+          <Field label="Karigar *">
+            <Combobox
+              options={options}
+              value={pickedId}
+              onChange={setPickedId}
+              placeholder="Search karigar…"
+              ariaLabel="Karigar"
+              autoFocus
+            />
+          </Field>
+        )}
         <Field label="Date">
           <DateField value={date} onChange={setDate} />
         </Field>
