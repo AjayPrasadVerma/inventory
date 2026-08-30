@@ -20,7 +20,8 @@ export interface ProductInput {
   category?: string | null;
   low_stock_qty?: number | null;
   notes?: string | null;
-  variants: string[];
+  /** Either the old bare labels, or size/design pairs from the edit form. */
+  variants: VariantInput[];
   /** One-time opening stock at create (onboarding); variant=null for a no-variant product. */
   opening?: { variant: string | null; qty: number }[];
 }
@@ -212,16 +213,30 @@ export const productsRepo = {
   },
 };
 
-async function replaceVariants(client: import('pg').PoolClient, productId: number, variants: string[]) {
-  // Dedupe requested variants (case-insensitive, trimmed).
-  const clean: string[] = [];
+/** A variant as the edit form sends it. A bare string is the old shape — the
+ *  composed label with nothing to split it by — and is kept so older callers do
+ *  not break. */
+export type VariantInput = string | { size?: string | null; design?: string | null };
+
+/** The label a variant is displayed and matched under. */
+function variantLabel(v: VariantInput): string {
+  if (typeof v === 'string') return v.trim();
+  return [(v.size ?? '').trim(), (v.design ?? '').trim()].filter(Boolean).join(' · ');
+}
+
+async function replaceVariants(client: import('pg').PoolClient, productId: number, variants: VariantInput[]) {
+  // Dedupe requested variants (case-insensitive, trimmed) by their label.
+  const clean: { label: string; size: string | null; design: string | null }[] = [];
   const seen = new Set<string>();
   for (const raw of variants) {
-    const v = raw.trim();
-    if (v && !seen.has(v.toLowerCase())) {
-      seen.add(v.toLowerCase());
-      clean.push(v);
-    }
+    const label = variantLabel(raw);
+    if (!label || seen.has(label.toLowerCase())) continue;
+    seen.add(label.toLowerCase());
+    // A pair keeps its parts; a bare string has none to keep, and inventing them
+    // by splitting the label would guess at data the caller never sent.
+    clean.push(typeof raw === 'string'
+      ? { label, size: null, design: null }
+      : { label, size: (raw.size ?? '').trim() || null, design: (raw.design ?? '').trim() || null });
   }
 
   // Variants are referenced by finished_stock/sale/job_receipt history — reconcile,
@@ -231,11 +246,26 @@ async function replaceVariants(client: import('pg').PoolClient, productId: numbe
     [productId],
   );
   const existingLc = new Set(existing.rows.map((r) => r.variant.toLowerCase()));
-  const desiredLc = new Set(clean.map((c) => c.toLowerCase()));
+  const desiredLc = new Set(clean.map((c) => c.label.toLowerCase()));
 
-  for (const variant of clean) {
+  // A row that already exists gets its parts refreshed: an edit that renames a
+  // size has to land on the columns, not only on the label.
+  for (const c of clean) {
+    if (existingLc.has(c.label.toLowerCase()) && (c.size !== null || c.design !== null)) {
+      await client.query(
+        `UPDATE product_variants SET size = $3, design = $4
+         WHERE product_id = $1 AND lower(variant) = lower($2)`,
+        [productId, c.label, c.size, c.design],
+      );
+    }
+  }
+
+  for (const { label: variant, size, design } of clean) {
     if (!existingLc.has(variant.toLowerCase())) {
-      await client.query('INSERT INTO product_variants (product_id, variant) VALUES ($1,$2)', [productId, variant]);
+      await client.query(
+        'INSERT INTO product_variants (product_id, variant, size, design) VALUES ($1,$2,$3,$4)',
+        [productId, variant, size, design],
+      );
     }
   }
   for (const row of existing.rows) {

@@ -14,11 +14,27 @@ import { ConfirmDialog } from "@/components/ui/confirm";
 import { Card, EmptyState, Spinner } from "@/components/ui/misc";
 import { PageHeader, Pagination } from "@/components/page-parts";
 import { Icon } from "@/components/icons";
-import { CatalogueForm, type CatalogueKind, type CatalogueRecord } from "@/components/catalogue-form";
-import { CatalogueSheetModal } from "@/components/catalogue-sheet-modal";
+import {
+  CatalogueSheetModal, type CatalogueKind, type CatalogueRecord, type SheetRecord,
+} from "@/components/catalogue-sheet-modal";
 
 interface Row extends CatalogueRecord {
   on_hand: { unit: string; qty: number }[];
+}
+
+/**
+ * A list row as the sheet wants it: one line per stock bucket, carrying what is
+ * in it so the quantity column can be corrected rather than re-entered.
+ *
+ * Both kinds come from variant_rows, which is grouped the way stock is actually
+ * keyed — raw on (unit, colour), finished on its variant. Using the on_hand
+ * summary instead would show a raw material's two colours as one row holding
+ * both, and saving that would book the difference against a bucket that holds
+ * none of it.
+ */
+function toSheetRecord(r: Row): SheetRecord {
+  const rows = (r.variant_rows ?? []).map((v) => ({ size: v.size, design: v.design, qty: v.qty }));
+  return { id: r.id, kind: r.kind, name: r.name, rows };
 }
 
 const KIND_LABEL: Record<CatalogueKind, string> = { item: "Raw material", product: "Finished" };
@@ -42,7 +58,6 @@ export default function CataloguePage() {
   const [kind, setKind] = useState<"" | CatalogueKind>("");
   const [category, setCategory] = useState("");
   const [categories, setCategories] = useState<string[]>([]);
-  const [unitOptions, setUnitOptions] = useState<string[]>([]);
 
   const [editing, setEditing] = useState<Row | null>(null);
   const [creating, setCreating] = useState(false);
@@ -51,7 +66,6 @@ export default function CataloguePage() {
 
   useEffect(() => {
     api<{ data: string[] }>("/catalogue/meta/categories").then((r) => setCategories(r.data)).catch(() => {});
-    api<{ data: string[] }>("/items/meta/units").then((r) => setUnitOptions(r.data)).catch(() => {});
   }, []);
 
   // The command palette links here as `?new=1`; read it reactively so it fires
@@ -193,25 +207,13 @@ export default function CataloguePage() {
         )}
       </Card>
 
-      {creating && (
+      {/* One sheet for both. Editing opens it on the record's own rows, because
+          the owner asked for adding and editing to be the same gesture. */}
+      {(creating || editing) && (
         <CatalogueSheetModal
-          onClose={() => setCreating(false)}
-          onDone={() => {
-            setCreating(false);
-            bustCache("/items/options");
-            bustCache("/products/options");
-            reload();
-          }}
-        />
-      )}
-
-      {editing && (
-        <CatalogueForm
-          record={editing}
-          categories={categories}
-          unitOptions={unitOptions}
+          record={editing ? toSheetRecord(editing) : null}
           onClose={() => { setCreating(false); setEditing(null); }}
-          onSaved={() => {
+          onDone={() => {
             setCreating(false);
             setEditing(null);
             bustCache("/items/options");
@@ -223,8 +225,13 @@ export default function CataloguePage() {
 
       <ConfirmDialog
         open={!!deleting}
-        title={deleting?.kind === "item" ? "Delete raw material?" : "Delete product?"}
-        message={<>Are you sure you want to delete <span className="font-semibold text-ink">{deleting?.name}</span>? This action cannot be undone.</>}
+        title={`Delete ${deleting?.kind === "item" ? "raw material" : "product"}?`}
+        message={
+          <>
+            Remove <span className="font-semibold text-ink">{deleting?.name}</span> from the list? Its
+            stock history stays, so nothing already recorded changes.
+          </>
+        }
         confirmLabel="Delete"
         tone="danger"
         loading={deleteLoading}

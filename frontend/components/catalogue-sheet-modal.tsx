@@ -14,9 +14,37 @@ import {
   BLANK_ROWS, EntrySheet, type SheetColumn, type SheetRow,
 } from "@/components/ui/entry-sheet";
 
-type Kind = "item" | "product";
+/** Raw material or finished goods. The list shows both; the sheet adds and edits
+ *  either, and which one decides where stock lands. */
+export type CatalogueKind = "item" | "product";
+type Kind = CatalogueKind;
+
+/** One stock bucket of a record, with what is in it. */
+export interface VariantRow { size: string | null; design: string | null; qty: number }
+
+/** A catalogue row as the list holds it. */
+export interface CatalogueRecord {
+  kind: CatalogueKind;
+  id: number;
+  name: string;
+  category: string | null;
+  low_stock_qty: string | null;
+  notes: string | null;
+  units: string[];
+  variants: string[];
+  variant_rows?: VariantRow[];
+}
 
 interface Suggestion { name: string; kind: Kind; sizes: string[]; designs: string[] }
+
+/** The record being edited, as the list already holds it. */
+export interface SheetRecord {
+  id: number;
+  kind: Kind;
+  name: string;
+  /** One row per size-and-design the record is stocked in, with what is on hand. */
+  rows: { size: string | null; design: string | null; qty: number }[];
+}
 
 let seq = 0;
 const blank = (): SheetRow => ({ key: ++seq, name: "", size: "", design: "", qty: "" });
@@ -39,17 +67,30 @@ const GRID =
  * moment; asking per row would be a column of identical answers.
  */
 export function CatalogueSheetModal({
+  record,
   onClose,
   onDone,
 }: {
+  /** Omitted when adding. Present when editing, and then the sheet opens on that
+   *  record's rows — same gesture either way, which is what was asked for. */
+  record?: SheetRecord | null;
   onClose: () => void;
   onDone: () => void;
 }) {
   const { toast } = useToast();
+  const editing = record != null;
 
-  const [kind, setKind] = useState<Kind>("item");
+  const [kind, setKind] = useState<Kind>(record?.kind ?? "item");
   const [date, setDate] = useState(todayISO());
-  const [lines, setLines] = useState<SheetRow[]>(() => Array.from({ length: BLANK_ROWS }, blank));
+  const [lines, setLines] = useState<SheetRow[]>(() => {
+    if (!record) return Array.from({ length: BLANK_ROWS }, blank);
+    // Quantity arrives showing what is on hand, so changing it reads as "make the
+    // stock this" — the server books only the difference.
+    const rows = record.rows.map((r) => ({
+      key: ++seq, name: record.name, size: r.size ?? "", design: r.design ?? "", qty: String(r.qty),
+    }));
+    return rows.length > 0 ? rows : [{ ...blank(), name: record.name }];
+  });
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [saving, setSaving] = useState(false);
   /** Rows a save attempt rejected. A toast alone leaves the owner hunting for
@@ -110,22 +151,38 @@ export function CatalogueSheetModal({
     setBadRows(new Set());
     setSaving(true);
     try {
-      await api("/catalogue/bulk", {
-        method: "POST",
-        body: {
-          kind,
-          on_date: date,
-          lines: named.map((l) => ({
-            name: String(l.name).trim(),
-            size: String(l.size).trim() || null,
-            design: String(l.design).trim() || null,
-            qty: Number(l.qty) || 0,
-          })),
-        },
-      });
+      if (editing) {
+        await api(`/catalogue/${record.id}/sheet`, {
+          method: "PUT",
+          body: {
+            kind,
+            name: String(named[0]!.name).trim(),
+            on_date: date,
+            lines: named.map((l) => ({
+              size: String(l.size).trim() || null,
+              design: String(l.design).trim() || null,
+              qty: String(l.qty).trim() === "" ? null : Number(l.qty),
+            })),
+          },
+        });
+      } else {
+        await api("/catalogue/bulk", {
+          method: "POST",
+          body: {
+            kind,
+            on_date: date,
+            lines: named.map((l) => ({
+              name: String(l.name).trim(),
+              size: String(l.size).trim() || null,
+              design: String(l.design).trim() || null,
+              qty: Number(l.qty) || 0,
+            })),
+          },
+        });
+      }
       // The catalogue changed, so anything holding a cached copy has to let go.
       bustCache("/catalogue");
-      toast(`${named.length} ${named.length === 1 ? "line" : "lines"} added`, "success");
+      toast(editing ? "Saved" : `${named.length} ${named.length === 1 ? "line" : "lines"} added`, "success");
       onDone();
     } catch (e) {
       toast((e as Error).message, "error");
@@ -140,7 +197,9 @@ export function CatalogueSheetModal({
       onClose={onClose}
       size="sheet"
       fill
-      title={isRaw ? "Add raw material" : "Add finished products"}
+      title={editing
+        ? `Edit ${record.name}`
+        : isRaw ? "Add raw material" : "Add finished products"}
       footer={(close) => (
         <>
           <span className="mr-auto text-sm text-muted">
@@ -155,14 +214,16 @@ export function CatalogueSheetModal({
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Field
           label="Type *"
-          hint="Raw material is issued to karigars; finished goods come back or are bought in"
+          hint={editing
+            ? "Can't be changed — the stock history lives with it"
+            : "Raw material is issued to karigars; finished goods come back or are bought in"}
         >
-          <Select value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
+          <Select value={kind} onChange={(e) => setKind(e.target.value as Kind)} disabled={editing}>
             <option value="item">Raw material</option>
             <option value="product">Finished product</option>
           </Select>
         </Field>
-        <Field label="Opening stock date" hint="When this stock was counted">
+        <Field label={editing ? "Correction date" : "Opening stock date"} hint="When this stock was counted">
           <DateField value={date} onChange={setDate} max={todayISO()} />
         </Field>
       </div>
@@ -180,7 +241,9 @@ export function CatalogueSheetModal({
           next.delete(key);
           return next;
         })}
-        note={<>Quantity is optional — leave it blank to add the name without stock.</>}
+        note={editing
+          ? <>Quantity is what is on hand — change it to correct the stock, or leave it to keep it.</>
+          : <>Quantity is optional — leave it blank to add the name without stock.</>}
       />
     </Modal>
   );

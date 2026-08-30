@@ -11,7 +11,8 @@ import { beforeAll, beforeEach, afterAll, describe, expect, it } from 'vitest';
 import { migrate, reset, pool, query } from './helpers/db.js';
 import { seedFixtures, finishedOnHand, type Fixtures } from './helpers/fixtures.js';
 import { assertCatalogueLines } from '../src/utils/catalogue.js';
-import { addCatalogueLines } from '../src/modules/catalogue/catalogue.repo.js';
+import { addCatalogueLines, editCatalogueFromSheet } from '../src/modules/catalogue/catalogue.repo.js';
+import { productsRepo } from '../src/modules/products/products.repo.js';
 
 let f: Fixtures;
 /** A second item/product, so we have a variant that provably belongs elsewhere. */
@@ -187,5 +188,147 @@ describe('adding from the sheet', () => {
     })).rejects.toThrow();
     // The first line's catalogue row must go back with the failed transaction.
     expect(await count('items', 'Batch Good')).toBe(0);
+  });
+});
+
+describe('editing a product keeps size and design apart', () => {
+  const variantRows = async (productId: number) =>
+    (await query<{ variant: string; size: string | null; design: string | null }>(
+      `SELECT variant, size, design FROM product_variants WHERE product_id = $1 ORDER BY variant`,
+      [productId])).rows;
+
+  it('stores the parts when the edit form sends a pair', async () => {
+    await addCatalogueLines({ kind: 'product', lines: [{ name: 'Edit Box', size: '2x3', design: 'Floral', qty: 1 }] });
+    const id = (await query<{ id: number }>(`SELECT id FROM products WHERE lower(name)='edit box'`)).rows[0]!.id;
+
+    await productsRepo.update(id, {
+      name: 'Edit Box',
+      variants: [{ size: '2x3', design: 'Floral' }, { size: '5x8', design: 'Plain' }],
+    });
+
+    const rows = await variantRows(id);
+    expect(rows).toHaveLength(2);
+    expect(rows.find((r) => r.variant === '2x3 · Floral')).toMatchObject({ size: '2x3', design: 'Floral' });
+    // The one added through the edit form carries its parts too — before this it
+    // would have been stored with the label only, and shown blank in the sheet.
+    expect(rows.find((r) => r.variant === '5x8 · Plain')).toMatchObject({ size: '5x8', design: 'Plain' });
+  });
+
+  it('refreshes the parts of a variant that already exists', async () => {
+    await addCatalogueLines({ kind: 'product', lines: [{ name: 'Refresh Box', size: '4x4', qty: 1 }] });
+    const id = (await query<{ id: number }>(`SELECT id FROM products WHERE lower(name)='refresh box'`)).rows[0]!.id;
+
+    // Same label, now with a design added alongside the size it already had.
+    await productsRepo.update(id, { name: 'Refresh Box', variants: [{ size: '4x4', design: null }] });
+    expect((await variantRows(id))[0]).toMatchObject({ size: '4x4', design: null });
+  });
+
+  it('still accepts a bare label from an older caller', async () => {
+    await addCatalogueLines({ kind: 'product', lines: [{ name: 'Legacy Box', size: 'Small', qty: 1 }] });
+    const id = (await query<{ id: number }>(`SELECT id FROM products WHERE lower(name)='legacy box'`)).rows[0]!.id;
+
+    await productsRepo.update(id, { name: 'Legacy Box', variants: ['Small', 'Large'] });
+    const rows = await variantRows(id);
+    expect(rows.map((r) => r.variant).sort()).toEqual(['Large', 'Small']);
+    // A bare string carries no parts, and splitting the label to invent some
+    // would be guessing at data the caller never sent.
+    expect(rows.find((r) => r.variant === 'Large')).toMatchObject({ size: null, design: null });
+  });
+});
+
+describe('editing from the sheet', () => {
+  const onHandRaw = async (itemId: number, unit: string) =>
+    Number((await query<{ q: string | null }>(
+      `SELECT SUM(qty)::text AS q FROM stock_movements WHERE item_id=$1 AND unit=$2`,
+      [itemId, unit])).rows[0]?.q ?? 0);
+
+  const makeRaw = async (name: string, qty: number) => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name, size: 'meter', design: 'Red', qty }] });
+    return (await query<{ id: number }>(
+      `SELECT id FROM items WHERE lower(name)=lower($1)`, [name])).rows[0]!.id;
+  };
+
+  it('books the difference, so saving the same number twice changes nothing', async () => {
+    const id = await makeRaw('Delta Velvet', 40);
+    expect(await onHandRaw(id, 'meter')).toBe(40);
+
+    // Opening the sheet and saving it untouched must be a no-op — this is the
+    // failure that would otherwise double the stock every time.
+    let out = await editCatalogueFromSheet({
+      kind: 'item', id, name: 'Delta Velvet',
+      lines: [{ size: 'meter', design: 'Red', qty: 40 }],
+    });
+    expect(out.adjusted).toBe(0);
+    expect(await onHandRaw(id, 'meter')).toBe(40);
+
+    // Correcting it upward books only what is missing.
+    out = await editCatalogueFromSheet({
+      kind: 'item', id, name: 'Delta Velvet',
+      lines: [{ size: 'meter', design: 'Red', qty: 55 }],
+    });
+    expect(out.adjusted).toBe(1);
+    expect(await onHandRaw(id, 'meter')).toBe(55);
+
+    // And downward.
+    await editCatalogueFromSheet({
+      kind: 'item', id, name: 'Delta Velvet',
+      lines: [{ size: 'meter', design: 'Red', qty: 12 }],
+    });
+    expect(await onHandRaw(id, 'meter')).toBe(12);
+  });
+
+  it('renames the record without creating a second one', async () => {
+    const id = await makeRaw('Old Name', 5);
+    await editCatalogueFromSheet({
+      kind: 'item', id, name: 'New Name',
+      lines: [{ size: 'meter', design: 'Red', qty: 5 }],
+    });
+    const rows = await query(`SELECT id FROM items WHERE lower(name) IN ('old name','new name')`);
+    expect(rows.rowCount).toBe(1);
+    expect((await query<{ name: string }>(`SELECT name FROM items WHERE id=$1`, [id])).rows[0]!.name).toBe('New Name');
+  });
+
+  it('refuses a rename onto a name already in that catalogue', async () => {
+    const a = await makeRaw('Keep Me', 1);
+    await makeRaw('Take My Name', 1);
+    await expect(editCatalogueFromSheet({
+      kind: 'item', id: a, name: 'Take My Name', lines: [],
+    })).rejects.toThrow(/already called/i);
+    // The first name survives the refusal.
+    expect((await query<{ name: string }>(`SELECT name FROM items WHERE id=$1`, [a])).rows[0]!.name).toBe('Keep Me');
+  });
+
+  it('leaves a line alone when its quantity is blank', async () => {
+    const id = await makeRaw('Untouched', 30);
+    const out = await editCatalogueFromSheet({
+      kind: 'item', id, name: 'Untouched',
+      lines: [{ size: 'meter', design: 'Red', qty: null }],
+    });
+    expect(out.adjusted).toBe(0);
+    expect(await onHandRaw(id, 'meter')).toBe(30);
+  });
+
+  it('adds a size that was not there before', async () => {
+    const id = await makeRaw('Grow Sizes', 10);
+    await editCatalogueFromSheet({
+      kind: 'item', id, name: 'Grow Sizes',
+      lines: [{ size: 'meter', design: 'Red', qty: 10 }, { size: 'roll', design: 'Red', qty: 4 }],
+    });
+    const units = await query<{ unit: string }>(
+      `SELECT unit FROM item_units WHERE item_id=$1 ORDER BY unit`, [id]);
+    expect(units.rows.map((r) => r.unit)).toEqual(['meter', 'roll']);
+    expect(await onHandRaw(id, 'roll')).toBe(4);
+  });
+
+  it('corrects a finished product against its own variant', async () => {
+    await addCatalogueLines({ kind: 'product', lines: [{ name: 'Edit Fin', size: '2x3', design: 'Floral', qty: 20 }] });
+    const id = (await query<{ id: number }>(`SELECT id FROM products WHERE lower(name)='edit fin'`)).rows[0]!.id;
+    expect(await finishedOnHand(id)).toBe(20);
+
+    await editCatalogueFromSheet({
+      kind: 'product', id, name: 'Edit Fin',
+      lines: [{ size: '2x3', design: 'Floral', qty: 8 }],
+    });
+    expect(await finishedOnHand(id)).toBe(8);
   });
 });
