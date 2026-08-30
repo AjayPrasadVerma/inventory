@@ -9,8 +9,13 @@
  */
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from 'vitest';
 import { migrate, reset, pool, query } from './helpers/db.js';
-import { seedFixtures, type Fixtures } from './helpers/fixtures.js';
+import { seedFixtures, finishedOnHand, type Fixtures } from './helpers/fixtures.js';
 import { assertCatalogueLines } from '../src/utils/catalogue.js';
+import {
+  addCatalogueLines, convertCatalogueKind, editCatalogueFromSheet,
+} from '../src/modules/catalogue/catalogue.repo.js';
+import { karigarEntriesRepo } from '../src/modules/karigar-entries/karigar-entries.repo.js';
+import { productsRepo } from '../src/modules/products/products.repo.js';
 
 let f: Fixtures;
 /** A second item/product, so we have a variant that provably belongs elsewhere. */
@@ -108,5 +113,421 @@ describe('batching', () => {
 
   it('is a no-op for an empty list', async () => {
     await expect(assertCatalogueLines([])).resolves.toBeUndefined();
+  });
+});
+
+describe('adding from the sheet', () => {
+  const count = async (table: 'items' | 'products', name: string) =>
+    Number((await query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM ${table} WHERE lower(name) = lower($1)`, [name])).rows[0]!.n);
+
+  it('creates a raw material and books its opening stock in one call', async () => {
+    const out = await addCatalogueLines({
+      kind: 'item',
+      on_date: '2026-06-01',
+      lines: [{ name: 'Sheet Velvet', size: 'meter', design: 'Maroon', qty: 40 }],
+    });
+    expect(out).toEqual({ created: 1, stocked: 1 });
+    expect(await count('items', 'Sheet Velvet')).toBe(1);
+
+    // Size became the unit and design the colour, so the stock page counts it the
+    // same way every other path does.
+    const mv = await query<{ unit: string; qty: string; reason: string; note: string }>(
+      `SELECT sm.unit, sm.qty, sm.reason, sm.note FROM stock_movements sm
+       JOIN items i ON i.id = sm.item_id WHERE lower(i.name) = 'sheet velvet'`);
+    expect(mv.rowCount).toBe(1);
+    expect(mv.rows[0]!.unit).toBe('meter');
+    expect(Number(mv.rows[0]!.qty)).toBe(40);
+    expect(mv.rows[0]!.reason).toBe('adjustment');
+    expect(mv.rows[0]!.note).toBe('Opening stock');
+  });
+
+  it('creates a finished product with size and design split apart', async () => {
+    await addCatalogueLines({
+      kind: 'product',
+      lines: [{ name: 'Sheet Ring Box', size: '2x3', design: 'Floral', qty: 12 }],
+    });
+    const v = await query<{ variant: string; size: string; design: string }>(
+      `SELECT pv.variant, pv.size, pv.design FROM product_variants pv
+       JOIN products p ON p.id = pv.product_id WHERE lower(p.name) = 'sheet ring box'`);
+    expect(v.rowCount).toBe(1);
+    expect(v.rows[0]!.size).toBe('2x3');
+    expect(v.rows[0]!.design).toBe('Floral');
+    expect(await finishedOnHand((await query<{ id: number }>(
+      `SELECT id FROM products WHERE lower(name) = 'sheet ring box'`)).rows[0]!.id)).toBe(12);
+  });
+
+  it('creates the row without stock when no quantity is given', async () => {
+    const out = await addCatalogueLines({
+      kind: 'item',
+      lines: [{ name: 'Not Yet Stocked', size: 'roll' }],
+    });
+    expect(out).toEqual({ created: 1, stocked: 0 });
+    expect(await count('items', 'Not Yet Stocked')).toBe(1);
+    const mv = await query(
+      `SELECT 1 FROM stock_movements sm JOIN items i ON i.id = sm.item_id
+       WHERE lower(i.name) = 'not yet stocked'`);
+    expect(mv.rowCount).toBe(0);
+  });
+
+  it('reuses a name already in the catalogue instead of duplicating it', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Twice Named', size: 'meter', qty: 5 }] });
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'twice named', size: 'roll', qty: 3 }] });
+    expect(await count('items', 'Twice Named')).toBe(1);
+    // Both units are on the one item, and both movements landed.
+    const units = await query(
+      `SELECT u.unit FROM item_units u JOIN items i ON i.id = u.item_id
+       WHERE lower(i.name) = 'twice named' ORDER BY u.unit`);
+    expect(units.rows.map((r: { unit: string }) => r.unit)).toEqual(['meter', 'roll']);
+  });
+
+  it('leaves nothing behind when a line in the batch fails', async () => {
+    await expect(addCatalogueLines({
+      kind: 'item',
+      lines: [
+        { name: 'Batch Good', size: 'meter', qty: 5 },
+        { name: 'Batch Bad', size: 'meter', qty: -1 },
+      ],
+    })).rejects.toThrow();
+    // The first line's catalogue row must go back with the failed transaction.
+    expect(await count('items', 'Batch Good')).toBe(0);
+  });
+});
+
+describe('editing a product keeps size and design apart', () => {
+  const variantRows = async (productId: number) =>
+    (await query<{ variant: string; size: string | null; design: string | null }>(
+      `SELECT variant, size, design FROM product_variants WHERE product_id = $1 ORDER BY variant`,
+      [productId])).rows;
+
+  it('stores the parts when the edit form sends a pair', async () => {
+    await addCatalogueLines({ kind: 'product', lines: [{ name: 'Edit Box', size: '2x3', design: 'Floral', qty: 1 }] });
+    const id = (await query<{ id: number }>(`SELECT id FROM products WHERE lower(name)='edit box'`)).rows[0]!.id;
+
+    await productsRepo.update(id, {
+      name: 'Edit Box',
+      variants: [{ size: '2x3', design: 'Floral' }, { size: '5x8', design: 'Plain' }],
+    });
+
+    const rows = await variantRows(id);
+    expect(rows).toHaveLength(2);
+    expect(rows.find((r) => r.variant === '2x3 · Floral')).toMatchObject({ size: '2x3', design: 'Floral' });
+    // The one added through the edit form carries its parts too — before this it
+    // would have been stored with the label only, and shown blank in the sheet.
+    expect(rows.find((r) => r.variant === '5x8 · Plain')).toMatchObject({ size: '5x8', design: 'Plain' });
+  });
+
+  it('refreshes the parts of a variant that already exists', async () => {
+    await addCatalogueLines({ kind: 'product', lines: [{ name: 'Refresh Box', size: '4x4', qty: 1 }] });
+    const id = (await query<{ id: number }>(`SELECT id FROM products WHERE lower(name)='refresh box'`)).rows[0]!.id;
+
+    // Same label, now with a design added alongside the size it already had.
+    await productsRepo.update(id, { name: 'Refresh Box', variants: [{ size: '4x4', design: null }] });
+    expect((await variantRows(id))[0]).toMatchObject({ size: '4x4', design: null });
+  });
+
+  it('still accepts a bare label from an older caller', async () => {
+    await addCatalogueLines({ kind: 'product', lines: [{ name: 'Legacy Box', size: 'Small', qty: 1 }] });
+    const id = (await query<{ id: number }>(`SELECT id FROM products WHERE lower(name)='legacy box'`)).rows[0]!.id;
+
+    await productsRepo.update(id, { name: 'Legacy Box', variants: ['Small', 'Large'] });
+    const rows = await variantRows(id);
+    expect(rows.map((r) => r.variant).sort()).toEqual(['Large', 'Small']);
+    // A bare string carries no parts, and splitting the label to invent some
+    // would be guessing at data the caller never sent.
+    expect(rows.find((r) => r.variant === 'Large')).toMatchObject({ size: null, design: null });
+  });
+});
+
+describe('editing from the sheet', () => {
+  const onHandRaw = async (itemId: number, unit: string) =>
+    Number((await query<{ q: string | null }>(
+      `SELECT SUM(qty)::text AS q FROM stock_movements WHERE item_id=$1 AND unit=$2`,
+      [itemId, unit])).rows[0]?.q ?? 0);
+
+  const makeRaw = async (name: string, qty: number) => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name, size: 'meter', design: 'Red', qty }] });
+    return (await query<{ id: number }>(
+      `SELECT id FROM items WHERE lower(name)=lower($1)`, [name])).rows[0]!.id;
+  };
+
+  it('books the difference, so saving the same number twice changes nothing', async () => {
+    const id = await makeRaw('Delta Velvet', 40);
+    expect(await onHandRaw(id, 'meter')).toBe(40);
+
+    // Opening the sheet and saving it untouched must be a no-op — this is the
+    // failure that would otherwise double the stock every time.
+    let out = await editCatalogueFromSheet({ kind: 'item', id, name: 'Delta Velvet',
+      lines: [{ size: 'meter', design: 'Red', qty: 40 }],
+    });
+    expect(out.adjusted).toBe(0);
+    expect(await onHandRaw(id, 'meter')).toBe(40);
+
+    // Correcting it upward books only what is missing.
+    out = await editCatalogueFromSheet({ kind: 'item', id, name: 'Delta Velvet',
+      lines: [{ size: 'meter', design: 'Red', qty: 55 }],
+    });
+    expect(out.adjusted).toBe(1);
+    expect(await onHandRaw(id, 'meter')).toBe(55);
+
+    // And downward.
+    await editCatalogueFromSheet({ kind: 'item', id, name: 'Delta Velvet',
+      lines: [{ size: 'meter', design: 'Red', qty: 12 }],
+    });
+    expect(await onHandRaw(id, 'meter')).toBe(12);
+  });
+
+  it('renames the record without creating a second one', async () => {
+    const id = await makeRaw('Old Name', 5);
+    await editCatalogueFromSheet({ kind: 'item', id, name: 'New Name',
+      lines: [{ size: 'meter', design: 'Red', qty: 5 }],
+    });
+    const rows = await query(`SELECT id FROM items WHERE lower(name) IN ('old name','new name')`);
+    expect(rows.rowCount).toBe(1);
+    expect((await query<{ name: string }>(`SELECT name FROM items WHERE id=$1`, [id])).rows[0]!.name).toBe('New Name');
+  });
+
+  it('refuses a rename onto a name already in that catalogue', async () => {
+    const a = await makeRaw('Keep Me', 1);
+    await makeRaw('Take My Name', 1);
+    await expect(editCatalogueFromSheet({ kind: 'item', id: a, name: 'Take My Name', lines: [],
+    })).rejects.toThrow(/already called/i);
+    // The first name survives the refusal.
+    expect((await query<{ name: string }>(`SELECT name FROM items WHERE id=$1`, [a])).rows[0]!.name).toBe('Keep Me');
+  });
+
+  it('leaves a line alone when its quantity is blank', async () => {
+    const id = await makeRaw('Untouched', 30);
+    const out = await editCatalogueFromSheet({ kind: 'item', id, name: 'Untouched',
+      lines: [{ size: 'meter', design: 'Red', qty: null }],
+    });
+    expect(out.adjusted).toBe(0);
+    expect(await onHandRaw(id, 'meter')).toBe(30);
+  });
+
+  it('adds a size that was not there before', async () => {
+    const id = await makeRaw('Grow Sizes', 10);
+    await editCatalogueFromSheet({ kind: 'item', id, name: 'Grow Sizes',
+      lines: [{ size: 'meter', design: 'Red', qty: 10 }, { size: 'roll', design: 'Red', qty: 4 }],
+    });
+    const units = await query<{ unit: string }>(
+      `SELECT unit FROM item_units WHERE item_id=$1 ORDER BY unit`, [id]);
+    expect(units.rows.map((r) => r.unit)).toEqual(['meter', 'roll']);
+    expect(await onHandRaw(id, 'roll')).toBe(4);
+  });
+
+  it('corrects a finished product against its own variant', async () => {
+    await addCatalogueLines({ kind: 'product', lines: [{ name: 'Edit Fin', size: '2x3', design: 'Floral', qty: 20 }] });
+    const id = (await query<{ id: number }>(`SELECT id FROM products WHERE lower(name)='edit fin'`)).rows[0]!.id;
+    expect(await finishedOnHand(id)).toBe(20);
+
+    await editCatalogueFromSheet({ kind: 'product', id, name: 'Edit Fin',
+      lines: [{ size: '2x3', design: 'Floral', qty: 8 }],
+    });
+    expect(await finishedOnHand(id)).toBe(8);
+  });
+});
+
+describe('changing a record\'s type', () => {
+  const rawTotal = async (name: string) =>
+    Number((await query<{ q: string | null }>(
+      `SELECT SUM(sm.qty)::text AS q FROM stock_movements sm JOIN items i ON i.id = sm.item_id
+       WHERE lower(i.name) = lower($1)`, [name])).rows[0]?.q ?? 0);
+  const finTotal = async (name: string) =>
+    Number((await query<{ q: string | null }>(
+      `SELECT SUM(f.qty)::text AS q FROM finished_stock_movements f JOIN products p ON p.id = f.product_id
+       WHERE lower(p.name) = lower($1)`, [name])).rows[0]?.q ?? 0);
+
+  it('moves the record and its stock, without leaving the old copy behind', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [
+      { name: 'Wrong Kind', size: '2x3', design: 'Red', qty: 50 },
+      { name: 'Wrong Kind', size: '5x8', design: 'Blue', qty: 20 },
+    ] });
+    const id = (await query<{ id: number }>(`SELECT id FROM items WHERE lower(name)='wrong kind'`)).rows[0]!.id;
+    expect(await rawTotal('Wrong Kind')).toBe(70);
+
+    const out = await convertCatalogueKind({ from: 'item', id });
+    expect(out.kind).toBe('product');
+
+    // The whole quantity is on the other side, and none of it is left on this one
+    // — the shop must not end up counting the same things twice.
+    expect(await finTotal('Wrong Kind')).toBe(70);
+    expect(await rawTotal('Wrong Kind')).toBe(0);
+    expect((await query(`SELECT 1 FROM items WHERE lower(name)='wrong kind'`)).rowCount).toBe(0);
+
+    // Each bucket kept its own size and design rather than being summed together.
+    const rows = await query<{ size: string; design: string }>(
+      `SELECT pv.size, pv.design FROM product_variants pv JOIN products p ON p.id = pv.product_id
+       WHERE lower(p.name)='wrong kind' ORDER BY pv.size`);
+    expect(rows.rows).toEqual([{ size: '2x3', design: 'Red' }, { size: '5x8', design: 'Blue' }]);
+  });
+
+  it('converts back the other way', async () => {
+    await addCatalogueLines({ kind: 'product', lines: [{ name: 'Back Again', size: 'meter', design: 'Gold', qty: 15 }] });
+    const id = (await query<{ id: number }>(`SELECT id FROM products WHERE lower(name)='back again'`)).rows[0]!.id;
+
+    await convertCatalogueKind({ from: 'product', id });
+    expect(await rawTotal('Back Again')).toBe(15);
+    expect(await finTotal('Back Again')).toBe(0);
+    // Size became the unit again, which is the shape raw stock is counted in.
+    const u = await query<{ unit: string }>(
+      `SELECT u.unit FROM item_units u JOIN items i ON i.id = u.item_id WHERE lower(i.name)='back again'`);
+    expect(u.rows.map((x) => x.unit)).toEqual(['meter']);
+  });
+
+  it('refuses when a recorded entry already points at it', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'In Use', size: 'meter', qty: 10 }] });
+    const id = (await query<{ id: number }>(`SELECT id FROM items WHERE lower(name)='in use'`)).rows[0]!.id;
+
+    // One karigar entry line is enough: it points at items by id, and moving the
+    // record would leave that line with nothing on the other end.
+    await karigarEntriesRepo.create({
+      karigar_id: f.karigarId, direction: 'out',
+      lines: [{ name: 'In Use', size: 'meter', qty: 2 }],
+    });
+
+    await expect(convertCatalogueKind({ from: 'item', id })).rejects.toThrow(/already used/i);
+    // Nothing moved, and the record is still where it was.
+    expect((await query(`SELECT 1 FROM items WHERE id=$1`, [id])).rowCount).toBe(1);
+    expect(await finTotal('In Use')).toBe(0);
+  });
+});
+
+describe('the holes QA found', () => {
+  const nameOf = async (table: 'items' | 'products', id: number) =>
+    (await query<{ name: string }>(`SELECT name FROM ${table} WHERE id = $1`, [id])).rows[0]?.name;
+
+  it('refuses to convert onto a name the other catalogue already holds', async () => {
+    // Both catalogues may hold the same name — neither has a unique index — so
+    // converting used to insert a second row and then resolve the stock BY NAME,
+    // landing it on the pre-existing namesake and leaving an empty duplicate.
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Clash', size: 'meter', qty: 20 }] });
+    await addCatalogueLines({ kind: 'product', lines: [{ name: 'Clash', size: 'pcs', qty: 5 }] });
+    const itemId = (await query<{ id: number }>(`SELECT id FROM items WHERE lower(name)='clash'`)).rows[0]!.id;
+
+    await expect(convertCatalogueKind({ from: 'item', id: itemId })).rejects.toThrow(/already exists/i);
+
+    // Nothing moved and no duplicate was created.
+    expect((await query(`SELECT 1 FROM products WHERE lower(name)='clash'`)).rowCount).toBe(1);
+    expect((await query(`SELECT 1 FROM items WHERE id=$1`, [itemId])).rowCount).toBe(1);
+    const finQty = Number((await query<{ q: string | null }>(
+      `SELECT SUM(f.qty)::text AS q FROM finished_stock_movements f
+       JOIN products p ON p.id = f.product_id WHERE lower(p.name)='clash'`)).rows[0]?.q ?? 0);
+    expect(finQty).toBe(5);
+  });
+
+  it('puts the converted stock on the record it returns', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Lands Right', size: 'meter', qty: 30 }] });
+    const id = (await query<{ id: number }>(`SELECT id FROM items WHERE lower(name)='lands right'`)).rows[0]!.id;
+    const out = await convertCatalogueKind({ from: 'item', id });
+    const onNew = Number((await query<{ q: string | null }>(
+      `SELECT SUM(qty)::text AS q FROM finished_stock_movements WHERE product_id = $1`, [out.id])).rows[0]?.q ?? 0);
+    expect(onNew).toBe(30);
+  });
+
+  it('edits the record in the catalogue the path names, not one sharing its id', async () => {
+    // items and products are separate sequences, so one id routinely exists in
+    // both. The kind travels in the URL; picking it by probing one table first
+    // renamed whichever record that table happened to hold.
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Twin Item', size: 'meter', qty: 1 }] });
+    await addCatalogueLines({ kind: 'product', lines: [{ name: 'Twin Product', size: 'pcs', qty: 1 }] });
+    const itemId = (await query<{ id: number }>(`SELECT id FROM items WHERE lower(name)='twin item'`)).rows[0]!.id;
+    const prodId = (await query<{ id: number }>(`SELECT id FROM products WHERE lower(name)='twin product'`)).rows[0]!.id;
+
+    await editCatalogueFromSheet({ kind: 'product', id: prodId, name: 'Renamed Product', lines: [] });
+    expect(await nameOf('products', prodId)).toBe('Renamed Product');
+    expect(await nameOf('items', itemId)).toBe('Twin Item');
+  });
+
+  it('does not invent a pcs unit when a line names no size and sets no quantity', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'No Pcs', size: 'meter', qty: 5 }] });
+    const id = (await query<{ id: number }>(`SELECT id FROM items WHERE lower(name)='no pcs'`)).rows[0]!.id;
+
+    // This is what opening the sheet on a record with no buckets and saving it
+    // untouched sends.
+    await editCatalogueFromSheet({ kind: 'item', id, name: 'No Pcs', lines: [{ size: null, design: null, qty: null }] });
+    const units = await query<{ unit: string }>(`SELECT unit FROM item_units WHERE item_id=$1 ORDER BY unit`, [id]);
+    expect(units.rows.map((u) => u.unit)).toEqual(['meter']);
+  });
+
+  it('settles a sub-milli correction instead of writing a zero every save', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Tiny Delta', size: 'meter', qty: 10 }] });
+    const id = (await query<{ id: number }>(`SELECT id FROM items WHERE lower(name)='tiny delta'`)).rows[0]!.id;
+
+    // A difference below the column's precision rounds to nothing, so it must be
+    // treated as no change rather than logged as a correction for ever.
+    for (let i = 0; i < 3; i += 1) {
+      await editCatalogueFromSheet({ kind: 'item', id, name: 'Tiny Delta', lines: [{ size: 'meter', qty: 10.0004 }] });
+    }
+    const moves = await query(`SELECT 1 FROM stock_movements WHERE item_id=$1`, [id]);
+    expect(moves.rowCount).toBe(1);
+  });
+
+  it('zeroes a bucket the sheet sends as 0, and keeps its size in the catalogue', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [
+      { name: 'Cleared', size: 'meter', design: 'Red', qty: 10 },
+      { name: 'Cleared', size: 'roll', design: 'Red', qty: 4 },
+    ] });
+    const id = (await query<{ id: number }>(`SELECT id FROM items WHERE lower(name)='cleared'`)).rows[0]!.id;
+
+    await editCatalogueFromSheet({ kind: 'item', id, name: 'Cleared', lines: [
+      { size: 'meter', design: 'Red', qty: 10 },
+      { size: 'roll', design: 'Red', qty: 0 },
+    ] });
+
+    const roll = Number((await query<{ q: string | null }>(
+      `SELECT SUM(qty)::text AS q FROM stock_movements WHERE item_id=$1 AND unit='roll'`, [id])).rows[0]?.q ?? 0);
+    expect(roll).toBe(0);
+    // The size stays — clearing a line is not the owner losing the catalogue.
+    const units = await query<{ unit: string }>(`SELECT unit FROM item_units WHERE item_id=$1 ORDER BY unit`, [id]);
+    expect(units.rows.map((u) => u.unit)).toEqual(['meter', 'roll']);
+  });
+
+  it('accepts a negative, because a record can genuinely be oversold', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Oversold', size: 'meter', qty: 5 }] });
+    const id = (await query<{ id: number }>(`SELECT id FROM items WHERE lower(name)='oversold'`)).rows[0]!.id;
+    await editCatalogueFromSheet({ kind: 'item', id, name: 'Oversold', lines: [{ size: 'meter', qty: -3 }] });
+    const q = Number((await query<{ q: string | null }>(
+      `SELECT SUM(qty)::text AS q FROM stock_movements WHERE item_id=$1`, [id])).rows[0]?.q ?? 0);
+    expect(q).toBe(-3);
+  });
+});
+
+describe('the convert guard covers movements, not just tables', () => {
+  it('refuses when material was returned, which leaves a movement and no line', async () => {
+    // jobs.repo writes a 'job_return' stock movement with no job_issues row, so a
+    // guard built from a table allowlist let such a record through and then
+    // hard-deleted that movement — real ledger history.
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Returned Once', size: 'meter', qty: 10 }] });
+    const id = (await query<{ id: number }>(`SELECT id FROM items WHERE lower(name)='returned once'`)).rows[0]!.id;
+    const job = (await query<{ id: number }>(
+      `INSERT INTO jobs (karigar_id) VALUES ($1) RETURNING id`, [f.karigarId])).rows[0]!.id;
+    await query(
+      `INSERT INTO stock_movements (item_id, unit, qty, reason, ref_id)
+       VALUES ($1,'meter',-2,'job_return',$2)`, [id, job]);
+
+    await expect(convertCatalogueKind({ from: 'item', id })).rejects.toThrow(/already used/i);
+    // The movement is still there.
+    const kept = await query(`SELECT 1 FROM stock_movements WHERE item_id=$1 AND reason='job_return'`, [id]);
+    expect(kept.rowCount).toBe(1);
+  });
+
+  it('still converts a record whose only movements are adjustments', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Only Opening', size: 'meter', qty: 6 }] });
+    const id = (await query<{ id: number }>(`SELECT id FROM items WHERE lower(name)='only opening'`)).rows[0]!.id;
+    const out = await convertCatalogueKind({ from: 'item', id });
+    expect(out.kind).toBe('product');
+  });
+
+  it('does not let a hidden record block a rename', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Ghost', size: 'meter', qty: 1 }] });
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Live One', size: 'meter', qty: 1 }] });
+    await query(`UPDATE items SET is_active = FALSE WHERE lower(name) = 'ghost'`);
+    const id = (await query<{ id: number }>(`SELECT id FROM items WHERE lower(name)='live one'`)).rows[0]!.id;
+
+    // "Ghost" is invisible in the UI, so refusing the rename would name something
+    // the owner cannot find.
+    await editCatalogueFromSheet({ kind: 'item', id, name: 'Ghost', lines: [] });
+    expect((await query<{ name: string }>(`SELECT name FROM items WHERE id=$1`, [id])).rows[0]!.name).toBe('Ghost');
   });
 });

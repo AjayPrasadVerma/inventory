@@ -53,6 +53,24 @@ export async function resolveRawLine(
   line: TypedLine,
 ): Promise<{ itemId: number; unit: string; variantId: number | null }> {
   const itemId = await findOrCreateCatalogue(client, 'item', line.name);
+  const parts = await resolveRawParts(client, itemId, line);
+  return { itemId, ...parts };
+}
+
+/**
+ * The same normalisation against a record the caller already has.
+ *
+ * Resolving by name is right when the owner typed one, and wrong when the caller
+ * knows exactly which row it means: two catalogues can hold the same name, so a
+ * name lookup can land on a different record than intended. Converting a record
+ * between catalogues hit exactly that — it created the destination row, then
+ * looked the name up again and posted the stock to a pre-existing namesake.
+ */
+export async function resolveRawParts(
+  client: PoolClient,
+  itemId: number,
+  line: Omit<TypedLine, 'name'>,
+): Promise<{ unit: string; variantId: number | null }> {
   const unit = (line.size ?? '').trim() || 'pcs';
 
   await client.query(
@@ -61,7 +79,7 @@ export async function resolveRawLine(
   );
 
   const design = (line.design ?? '').trim();
-  if (!design) return { itemId, unit, variantId: null };
+  if (!design) return { unit, variantId: null };
 
   await client.query(
     `INSERT INTO item_variants (item_id, color) VALUES ($1,$2) ON CONFLICT (item_id, color) DO NOTHING`,
@@ -71,7 +89,7 @@ export async function resolveRawLine(
     `SELECT id FROM item_variants WHERE item_id = $1 AND color = $2`,
     [itemId, design],
   );
-  return { itemId, unit, variantId: v.rows[0]?.id ?? null };
+  return { unit, variantId: v.rows[0]?.id ?? null };
 }
 
 /**
@@ -84,9 +102,19 @@ export async function resolveFinishedLine(
   line: TypedLine,
 ): Promise<{ productId: number; variantId: number | null }> {
   const productId = await findOrCreateCatalogue(client, 'product', line.name);
+  const { variantId } = await resolveFinishedParts(client, productId, line);
+  return { productId, variantId };
+}
+
+/** See resolveRawParts — the finished half, against a known product. */
+export async function resolveFinishedParts(
+  client: PoolClient,
+  productId: number,
+  line: Omit<TypedLine, 'name'>,
+): Promise<{ variantId: number | null }> {
   const size = (line.size ?? '').trim();
   const design = (line.design ?? '').trim();
-  if (!size && !design) return { productId, variantId: null };
+  if (!size && !design) return { variantId: null };
 
   const label = [size, design].filter(Boolean).join(' · ');
   const existing = await client.query<{ id: number }>(
@@ -97,7 +125,7 @@ export async function resolveFinishedLine(
      LIMIT 1`,
     [productId, size, design],
   );
-  if (existing.rows[0]) return { productId, variantId: existing.rows[0].id };
+  if (existing.rows[0]) return { variantId: existing.rows[0].id };
 
   const made = await client.query<{ id: number }>(
     `INSERT INTO product_variants (product_id, variant, size, design)
@@ -106,7 +134,7 @@ export async function resolveFinishedLine(
      RETURNING id`,
     [productId, label, size || null, design || null],
   );
-  return { productId, variantId: made.rows[0]!.id };
+  return { variantId: made.rows[0]!.id };
 }
 
 /**

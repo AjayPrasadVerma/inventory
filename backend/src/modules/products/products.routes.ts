@@ -13,7 +13,17 @@ const productSchema = z.object({
   category: z.string().trim().optional().nullable(),
   low_stock_qty: z.coerce.number().nonnegative().optional().nullable(),
   notes: z.string().trim().optional().nullable(),
-  variants: z.array(z.string().trim().min(1)).default([]),
+  // A variant is a size and a design, and the edit form sends them apart. A bare
+  // string is still accepted: that is what older callers send, and what a variant
+  // created before 010 split the columns actually is.
+  variants: z.array(z.union([
+    z.string().trim().min(1),
+    z.object({
+      size: z.string().trim().max(60).optional().nullable(),
+      design: z.string().trim().max(60).optional().nullable(),
+    }).refine((v) => !!((v.size ?? '').trim() || (v.design ?? '').trim()),
+      { message: 'A variant needs a size or a design' }),
+  ])).default([]),
   // Optional one-time opening stock (onboarding). Ignored on update.
   opening: z.array(z.object({
     variant: z.string().trim().min(1).nullable(),
