@@ -11,7 +11,10 @@ import { beforeAll, beforeEach, afterAll, describe, expect, it } from 'vitest';
 import { migrate, reset, pool, query } from './helpers/db.js';
 import { seedFixtures, finishedOnHand, type Fixtures } from './helpers/fixtures.js';
 import { assertCatalogueLines } from '../src/utils/catalogue.js';
-import { addCatalogueLines, editCatalogueFromSheet } from '../src/modules/catalogue/catalogue.repo.js';
+import {
+  addCatalogueLines, convertCatalogueKind, editCatalogueFromSheet,
+} from '../src/modules/catalogue/catalogue.repo.js';
+import { karigarEntriesRepo } from '../src/modules/karigar-entries/karigar-entries.repo.js';
 import { productsRepo } from '../src/modules/products/products.repo.js';
 
 let f: Fixtures;
@@ -330,5 +333,70 @@ describe('editing from the sheet', () => {
       lines: [{ size: '2x3', design: 'Floral', qty: 8 }],
     });
     expect(await finishedOnHand(id)).toBe(8);
+  });
+});
+
+describe('changing a record\'s type', () => {
+  const rawTotal = async (name: string) =>
+    Number((await query<{ q: string | null }>(
+      `SELECT SUM(sm.qty)::text AS q FROM stock_movements sm JOIN items i ON i.id = sm.item_id
+       WHERE lower(i.name) = lower($1)`, [name])).rows[0]?.q ?? 0);
+  const finTotal = async (name: string) =>
+    Number((await query<{ q: string | null }>(
+      `SELECT SUM(f.qty)::text AS q FROM finished_stock_movements f JOIN products p ON p.id = f.product_id
+       WHERE lower(p.name) = lower($1)`, [name])).rows[0]?.q ?? 0);
+
+  it('moves the record and its stock, without leaving the old copy behind', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [
+      { name: 'Wrong Kind', size: '2x3', design: 'Red', qty: 50 },
+      { name: 'Wrong Kind', size: '5x8', design: 'Blue', qty: 20 },
+    ] });
+    const id = (await query<{ id: number }>(`SELECT id FROM items WHERE lower(name)='wrong kind'`)).rows[0]!.id;
+    expect(await rawTotal('Wrong Kind')).toBe(70);
+
+    const out = await convertCatalogueKind({ from: 'item', id });
+    expect(out.kind).toBe('product');
+
+    // The whole quantity is on the other side, and none of it is left on this one
+    // — the shop must not end up counting the same things twice.
+    expect(await finTotal('Wrong Kind')).toBe(70);
+    expect(await rawTotal('Wrong Kind')).toBe(0);
+    expect((await query(`SELECT 1 FROM items WHERE lower(name)='wrong kind'`)).rowCount).toBe(0);
+
+    // Each bucket kept its own size and design rather than being summed together.
+    const rows = await query<{ size: string; design: string }>(
+      `SELECT pv.size, pv.design FROM product_variants pv JOIN products p ON p.id = pv.product_id
+       WHERE lower(p.name)='wrong kind' ORDER BY pv.size`);
+    expect(rows.rows).toEqual([{ size: '2x3', design: 'Red' }, { size: '5x8', design: 'Blue' }]);
+  });
+
+  it('converts back the other way', async () => {
+    await addCatalogueLines({ kind: 'product', lines: [{ name: 'Back Again', size: 'meter', design: 'Gold', qty: 15 }] });
+    const id = (await query<{ id: number }>(`SELECT id FROM products WHERE lower(name)='back again'`)).rows[0]!.id;
+
+    await convertCatalogueKind({ from: 'product', id });
+    expect(await rawTotal('Back Again')).toBe(15);
+    expect(await finTotal('Back Again')).toBe(0);
+    // Size became the unit again, which is the shape raw stock is counted in.
+    const u = await query<{ unit: string }>(
+      `SELECT u.unit FROM item_units u JOIN items i ON i.id = u.item_id WHERE lower(i.name)='back again'`);
+    expect(u.rows.map((x) => x.unit)).toEqual(['meter']);
+  });
+
+  it('refuses when a recorded entry already points at it', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'In Use', size: 'meter', qty: 10 }] });
+    const id = (await query<{ id: number }>(`SELECT id FROM items WHERE lower(name)='in use'`)).rows[0]!.id;
+
+    // One karigar entry line is enough: it points at items by id, and moving the
+    // record would leave that line with nothing on the other end.
+    await karigarEntriesRepo.create({
+      karigar_id: f.karigarId, direction: 'out',
+      lines: [{ name: 'In Use', size: 'meter', qty: 2 }],
+    });
+
+    await expect(convertCatalogueKind({ from: 'item', id })).rejects.toThrow(/already used/i);
+    // Nothing moved, and the record is still where it was.
+    expect((await query(`SELECT 1 FROM items WHERE id=$1`, [id])).rowCount).toBe(1);
+    expect(await finTotal('In Use')).toBe(0);
   });
 });

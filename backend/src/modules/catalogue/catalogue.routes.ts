@@ -3,7 +3,9 @@ import { z } from 'zod';
 import { requireAuth } from '../../middleware/auth.js';
 import { asyncHandler } from '../../utils/http.js';
 import { parseId, pastOrTodayDateSchema } from '../../utils/validation.js';
-import { addCatalogueLines, catalogueRepo, editCatalogueFromSheet } from './catalogue.repo.js';
+import {
+  addCatalogueLines, catalogueRepo, convertCatalogueKind, editCatalogueFromSheet,
+} from './catalogue.repo.js';
 
 export const catalogueRouter = Router();
 catalogueRouter.use(requireAuth);
@@ -82,6 +84,18 @@ catalogueRouter.put(
   asyncHandler(async (req, res) => {
     const input = editSheetSchema.parse(req.body);
     const out = await editCatalogueFromSheet({ ...input, id: parseId(req.params.id) });
+    res.json({ data: out });
+  }),
+);
+
+catalogueRouter.put(
+  '/:id/kind',
+  asyncHandler(async (req, res) => {
+    const input = z.object({
+      from: z.enum(['item', 'product']),
+      on_date: pastOrTodayDateSchema.optional().nullable(),
+    }).parse(req.body);
+    const out = await convertCatalogueKind({ ...input, id: parseId(req.params.id) });
     res.json({ data: out });
   }),
 );

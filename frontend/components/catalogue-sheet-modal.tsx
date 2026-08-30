@@ -151,8 +151,20 @@ export function CatalogueSheetModal({
     setBadRows(new Set());
     setSaving(true);
     try {
+      // Changing the type moves the record — and its stock — to the other
+      // catalogue, so it happens first and everything after it applies to the
+      // record in its new home.
+      let targetId = record?.id ?? 0;
+      if (editing && kind !== record.kind) {
+        const moved = await api<{ data: { id: number } }>(`/catalogue/${record.id}/kind`, {
+          method: "PUT",
+          body: { from: record.kind, on_date: date },
+        });
+        targetId = moved.data.id;
+      }
+
       if (editing) {
-        await api(`/catalogue/${record.id}/sheet`, {
+        await api(`/catalogue/${targetId}/sheet`, {
           method: "PUT",
           body: {
             kind,
@@ -215,10 +227,12 @@ export function CatalogueSheetModal({
         <Field
           label="Type *"
           hint={editing
-            ? "Can't be changed — the stock history lives with it"
+            ? (kind !== record.kind
+                ? "Saving will move this and its stock to the other catalogue"
+                : "Changing this moves the record and its stock — only possible while nothing has used it")
             : "Raw material is issued to karigars; finished goods come back or are bought in"}
         >
-          <Select value={kind} onChange={(e) => setKind(e.target.value as Kind)} disabled={editing}>
+          <Select value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
             <option value="item">Raw material</option>
             <option value="product">Finished product</option>
           </Select>

@@ -47,9 +47,9 @@ const ITEM_SIDE = `
          COALESCE((SELECT array_agg(v.color ORDER BY v.color) FROM item_variants v WHERE v.item_id = i.id), '{}') AS variants,
          COALESCE((
            SELECT json_agg(json_build_object('size', x.unit, 'design', x.color, 'qty', x.qty)
-                           ORDER BY x.unit, x.color)
+                           ORDER BY x.first_seen)
            FROM (
-             SELECT sm.unit, iv.color, SUM(sm.qty)::float8 AS qty
+             SELECT sm.unit, iv.color, SUM(sm.qty)::float8 AS qty, MIN(sm.id) AS first_seen
              FROM stock_movements sm
              LEFT JOIN item_variants iv ON iv.id = sm.variant_id
              WHERE sm.item_id = i.id
@@ -72,9 +72,9 @@ const PRODUCT_SIDE = `
          COALESCE((SELECT array_agg(pv.variant ORDER BY pv.variant) FROM product_variants pv WHERE pv.product_id = p.id), '{}') AS variants,
          COALESCE((
            SELECT json_agg(json_build_object('size', x.size, 'design', x.design, 'qty', x.qty)
-                           ORDER BY x.size, x.design)
+                           ORDER BY x.first_seen)
            FROM (
-             SELECT pv.size, pv.design, SUM(f.qty)::float8 AS qty
+             SELECT pv.size, pv.design, SUM(f.qty)::float8 AS qty, MIN(f.id) AS first_seen
              FROM finished_stock_movements f
              LEFT JOIN product_variants pv ON pv.id = f.variant_id
              WHERE f.product_id = p.id
@@ -304,5 +304,106 @@ export async function editCatalogueFromSheet(input: {
     }
 
     return { adjusted };
+  });
+}
+
+/**
+ * Move a record between the two catalogues.
+ *
+ * Type was locked because the stock history lives with the record, and that is
+ * still true — a raw material and a finished product keep their stock in
+ * different tables, so changing the type is a migration, not a field edit. But
+ * getting it wrong at creation is easy and the alternative was retyping the whole
+ * thing, so it is allowed when it can be done without losing anything.
+ *
+ * It cannot when a document already refers to the record: a karigar entry line, a
+ * purchase line, an old job issue or receipt, or a sale. Those point at one table
+ * by id, and moving the record out from under them would strand the line — the
+ * quantity would still be in the ledger with nothing on the other end. That is
+ * refused with the reason rather than half-done.
+ *
+ * Size carries the unit either way, which is what makes the two shapes line up:
+ * a raw bucket of (unit, colour) becomes a variant of (size, design), and back.
+ */
+export async function convertCatalogueKind(input: {
+  from: 'item' | 'product';
+  id: number;
+  on_date?: string | null;
+}): Promise<{ id: number; kind: 'item' | 'product' }> {
+  return withTransaction(async (client) => {
+    const toKind = input.from === 'item' ? 'product' : 'item';
+    const fromTable = input.from === 'item' ? 'items' : 'products';
+
+    const rec = await client.query<{ name: string; category: string | null; low_stock_qty: string | null; notes: string | null }>(
+      `SELECT name, category, low_stock_qty, notes FROM ${fromTable} WHERE id = $1`, [input.id]);
+    if (rec.rowCount === 0) throw new AppError(404, 'Not found');
+    const r = rec.rows[0]!;
+
+    // Anything that points at this record by id and is not its own stock.
+    const idCol = input.from === 'item' ? 'item_id' : 'product_id';
+    const users: [string, string][] = input.from === 'item'
+      ? [['karigar_entry_lines', 'karigar_entry_lines'], ['purchase_items', 'purchase_items'], ['job_issues', 'job_issues']]
+      : [['karigar_entry_lines', 'karigar_entry_lines'], ['purchase_items', 'purchase_items'], ['job_receipts', 'job_receipts'], ['sale_items', 'sale_items']];
+    for (const [table] of users) {
+      const used = await client.query(`SELECT 1 FROM ${table} WHERE ${idCol} = $1 LIMIT 1`, [input.id]);
+      if (used.rowCount) {
+        throw new AppError(409,
+          'This is already used in a recorded entry, so its type cannot be changed. Add it under the other type and use that from now on.');
+      }
+    }
+
+    // The buckets it currently holds, so they can be re-made on the other side.
+    const buckets = input.from === 'item'
+      ? (await client.query<{ size: string | null; design: string | null; qty: string }>(
+          `SELECT sm.unit AS size, iv.color AS design, SUM(sm.qty)::text AS qty
+           FROM stock_movements sm LEFT JOIN item_variants iv ON iv.id = sm.variant_id
+           WHERE sm.item_id = $1 GROUP BY sm.unit, iv.color ORDER BY MIN(sm.id)`, [input.id])).rows
+      : (await client.query<{ size: string | null; design: string | null; qty: string }>(
+          `SELECT pv.size, pv.design, SUM(f.qty)::text AS qty
+           FROM finished_stock_movements f LEFT JOIN product_variants pv ON pv.id = f.variant_id
+           WHERE f.product_id = $1 GROUP BY pv.size, pv.design ORDER BY MIN(f.id)`, [input.id])).rows;
+
+    const toTable = toKind === 'item' ? 'items' : 'products';
+    const made = await client.query<{ id: number }>(
+      `INSERT INTO ${toTable} (name, category, low_stock_qty, notes) VALUES ($1,$2,$3,$4) RETURNING id`,
+      [r.name, r.category, r.low_stock_qty, r.notes]);
+    const newId = made.rows[0]!.id;
+
+    for (const b of buckets) {
+      const qty = Number(b.qty);
+      const size = (b.size ?? '').trim();
+      const design = (b.design ?? '').trim();
+      if (toKind === 'item') {
+        const { itemId, unit, variantId } = await resolveRawLine(client, { name: r.name, size, design });
+        if (qty !== 0) {
+          await client.query(
+            `INSERT INTO stock_movements (item_id, variant_id, unit, qty, reason, moved_on, note)
+             VALUES ($1,$2,$3,$4,'adjustment', COALESCE($5, CURRENT_DATE), 'Type changed')`,
+            [itemId, variantId, unit, qty, input.on_date ?? null]);
+        }
+      } else {
+        const { productId, variantId } = await resolveFinishedLine(client, { name: r.name, size, design });
+        if (qty !== 0) {
+          await client.query(
+            `INSERT INTO finished_stock_movements (product_id, variant_id, qty, reason, moved_on, note)
+             VALUES ($1,$2,$3,'adjustment', COALESCE($4, CURRENT_DATE), 'Type changed')`,
+            [productId, variantId, qty, input.on_date ?? null]);
+        }
+      }
+    }
+
+    // The old record and its stock go, now that both are re-made on the other
+    // side — leaving them would double the shop's count of the same things.
+    if (input.from === 'item') {
+      await client.query(`DELETE FROM stock_movements WHERE item_id = $1`, [input.id]);
+      await client.query(`DELETE FROM item_units WHERE item_id = $1`, [input.id]);
+      await client.query(`DELETE FROM item_variants WHERE item_id = $1`, [input.id]);
+    } else {
+      await client.query(`DELETE FROM finished_stock_movements WHERE product_id = $1`, [input.id]);
+      await client.query(`DELETE FROM product_variants WHERE product_id = $1`, [input.id]);
+    }
+    await client.query(`DELETE FROM ${fromTable} WHERE id = $1`, [input.id]);
+
+    return { id: newId, kind: toKind };
   });
 }
