@@ -168,9 +168,16 @@ export default function KarigarAccountPage() {
         title={karigar?.name ?? "Karigar account"}
         subtitle={karigar ? [karigar.phone, karigar.product_types?.join(", ")].filter(Boolean).join(" · ") || undefined : undefined}
         actions={karigarId ? (
-          <Button variant="outline" onClick={() => setEditKarigar(true)} title="Karigar details">
-            <Icon.Edit /> <span className="hidden lg:inline">Details</span>
-          </Button>
+          <>
+            <span className="flex items-center gap-1.5 lg:hidden">
+              <StackButton onClick={() => setEntryForm("in")} label="+ In" aria="Record goods coming in" className="bg-[color:var(--success)] text-white" />
+              <StackButton onClick={() => setEntryForm("out")} label="+ Out" aria="Issue material out" className="bg-[color:var(--accent)] text-white" />
+              <StackButton onClick={() => setPayOpen(true)} label="+ Pay" aria="Record a payment" className="bg-primary text-primary-fg" />
+            </span>
+            <Button variant="outline" onClick={() => setEditKarigar(true)} title="Karigar details">
+              <Icon.Edit /> <span className="hidden lg:inline">Details</span>
+            </Button>
+          </>
         ) : undefined}
       />
 
@@ -218,7 +225,7 @@ export default function KarigarAccountPage() {
               headClass="khata-head-in"
               bodyClass="khata-col-in"
               action={
-                <StackButton onClick={() => setEntryForm("in")} label="+ In" aria="Record goods coming in" className="bg-[color:var(--success)] text-white" />
+                <span className="hidden lg:inline-flex"><StackButton onClick={() => setEntryForm("in")} label="+ In" aria="Record goods coming in" className="bg-[color:var(--success)] text-white" /></span>
               }
               empty="Nothing received in this range."
             >
@@ -232,7 +239,7 @@ export default function KarigarAccountPage() {
               headClass="khata-head-raw"
               bodyClass="khata-col-raw"
               action={
-                <StackButton onClick={() => setEntryForm("out")} label="+ Out" aria="Issue material out" className="bg-[color:var(--accent)] text-white" />
+                <span className="hidden lg:inline-flex"><StackButton onClick={() => setEntryForm("out")} label="+ Out" aria="Issue material out" className="bg-[color:var(--accent)] text-white" /></span>
               }
               empty="Nothing issued in this range."
             >
@@ -250,7 +257,7 @@ export default function KarigarAccountPage() {
               headClass="khata-head-pay"
               bodyClass="khata-col-pay"
               action={
-                <StackButton onClick={() => setPayOpen(true)} label="+ Pay" aria="Record a payment" className="bg-primary text-primary-fg" />
+                <span className="hidden lg:inline-flex"><StackButton onClick={() => setPayOpen(true)} label="+ Pay" aria="Record a payment" className="bg-primary text-primary-fg" /></span>
               }
               empty="No payment in this range."
             >
