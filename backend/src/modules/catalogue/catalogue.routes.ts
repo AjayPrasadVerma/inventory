@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../../middleware/auth.js';
 import { asyncHandler } from '../../utils/http.js';
-import { catalogueRepo } from './catalogue.repo.js';
+import { pastOrTodayDateSchema } from '../../utils/validation.js';
+import { addCatalogueLines, catalogueRepo } from './catalogue.repo.js';
 
 export const catalogueRouter = Router();
 catalogueRouter.use(requireAuth);
@@ -15,6 +16,24 @@ const listSchema = z.object({
   dir: z.enum(['asc', 'desc']).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(500).default(20),
+});
+
+/**
+ * A catalogue line as the sheet sends it: a typed name, and the size and design
+ * beside it. Quantity is optional — a thing can be stocked before any of it is
+ * in hand — but when present it books the opening stock in the same call, because
+ * the owner does not think of creating the row and saying how much there is as
+ * two separate acts.
+ */
+const bulkSchema = z.object({
+  kind: z.enum(['item', 'product']),
+  on_date: pastOrTodayDateSchema.optional().nullable(),
+  lines: z.array(z.object({
+    name: z.string().trim().min(1, 'Name is required').max(200),
+    size: z.string().trim().max(60).optional().nullable(),
+    design: z.string().trim().max(60).optional().nullable(),
+    qty: z.coerce.number().nonnegative().max(1_000_000).optional().nullable(),
+  })).min(1, 'Add at least one line').max(200, 'Too many lines'),
 });
 
 /** Raw materials and finished products in one list, each tagged with its kind. */
@@ -32,6 +51,16 @@ catalogueRouter.get(
       offset: (q.page - 1) * q.pageSize,
     });
     res.json({ data: rows, total, page: q.page, pageSize: q.pageSize });
+  }),
+);
+
+
+catalogueRouter.post(
+  '/bulk',
+  asyncHandler(async (req, res) => {
+    const input = bulkSchema.parse(req.body);
+    const out = await addCatalogueLines({ ...input, created_by: req.user?.id ?? null });
+    res.status(201).json({ data: out });
   }),
 );
 

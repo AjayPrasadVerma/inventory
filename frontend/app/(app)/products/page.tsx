@@ -15,6 +15,7 @@ import { Card, EmptyState, Spinner } from "@/components/ui/misc";
 import { PageHeader, Pagination } from "@/components/page-parts";
 import { Icon } from "@/components/icons";
 import { CatalogueForm, type CatalogueKind, type CatalogueRecord } from "@/components/catalogue-form";
+import { CatalogueSheetModal } from "@/components/catalogue-sheet-modal";
 
 interface Row extends CatalogueRecord {
   on_hand: { unit: string; qty: number }[];
@@ -192,7 +193,19 @@ export default function CataloguePage() {
         )}
       </Card>
 
-      {(creating || editing) && (
+      {creating && (
+        <CatalogueSheetModal
+          onClose={() => setCreating(false)}
+          onDone={() => {
+            setCreating(false);
+            bustCache("/items/options");
+            bustCache("/products/options");
+            reload();
+          }}
+        />
+      )}
+
+      {editing && (
         <CatalogueForm
           record={editing}
           categories={categories}

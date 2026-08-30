@@ -1,4 +1,6 @@
-import { query } from '../../config/db.js';
+import { query, withTransaction } from '../../config/db.js';
+import { AppError } from '../../utils/http.js';
+import { resolveFinishedLine, resolveRawLine } from '../../utils/catalogue-resolve.js';
 
 /**
  * One catalogue, two kinds of thing.
@@ -114,3 +116,56 @@ export const catalogueRepo = {
     return rows.map((r) => r.category);
   },
 };
+
+/**
+ * Add catalogue rows the way movement is recorded: a sheet of typed lines.
+ *
+ * The owner does not think of "create the product, then set its opening stock" as
+ * two acts — a thing exists because there is some of it on the shelf. So one line
+ * both creates the catalogue row and books what is already there, and the same
+ * resolver used by the karigar and purchase sheets does the creating, which is
+ * what keeps units, colours, sizes and designs landing in the same tables every
+ * other screen reads.
+ *
+ * A line with no quantity still creates the row — sometimes a thing is stocked
+ * before any of it is in hand.
+ */
+export async function addCatalogueLines(input: {
+  kind: 'item' | 'product';
+  on_date?: string | null;
+  lines: { name: string; size?: string | null; design?: string | null; qty?: number | null }[];
+  created_by?: number | null;
+}): Promise<{ created: number; stocked: number }> {
+  return withTransaction(async (client) => {
+    let stocked = 0;
+    for (const line of input.lines) {
+      const qty = Number(line.qty ?? 0);
+      // The route already rejects a negative, but silently skipping one here
+      // would let any other caller create the row and book nothing — the line
+      // would look accepted while doing something else entirely.
+      if (qty < 0) throw new AppError(400, `Quantity for "${line.name}" cannot be negative`);
+      if (input.kind === 'item') {
+        const { itemId, unit, variantId } = await resolveRawLine(client, line);
+        if (qty > 0) {
+          await client.query(
+            `INSERT INTO stock_movements (item_id, variant_id, unit, qty, reason, moved_on, note)
+             VALUES ($1,$2,$3,$4,'adjustment', COALESCE($5, CURRENT_DATE), 'Opening stock')`,
+            [itemId, variantId, unit, qty, input.on_date ?? null],
+          );
+          stocked += 1;
+        }
+      } else {
+        const { productId, variantId } = await resolveFinishedLine(client, line);
+        if (qty > 0) {
+          await client.query(
+            `INSERT INTO finished_stock_movements (product_id, variant_id, qty, reason, moved_on, note)
+             VALUES ($1,$2,$3,'adjustment', COALESCE($4, CURRENT_DATE), 'Opening stock')`,
+            [productId, variantId, qty, input.on_date ?? null],
+          );
+          stocked += 1;
+        }
+      }
+    }
+    return { created: input.lines.length, stocked };
+  });
+}
