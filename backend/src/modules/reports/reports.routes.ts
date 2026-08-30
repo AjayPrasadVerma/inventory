@@ -229,7 +229,7 @@ reportsRouter.get(
     const { date } = z.object({ date: dateStringSchema.optional() }).parse(req.query);
     const d = date ?? null; // null → CURRENT_DATE, resolved in SQL so it uses the server's day
 
-    const [purchases, issues, receipts, returns, payments, adjustments] = await Promise.all([
+    const [purchases, issues, receipts, payments, adjustments] = await Promise.all([
       query(
         `SELECT p.id, v.name AS party, p.bill_no, p.total_amount AS amount,
                 (SELECT json_agg(json_build_object(
@@ -247,34 +247,32 @@ reportsRouter.get(
          ORDER BY p.id DESC`, [d]),
 
       query(
-        `SELECT j.id, k.name AS party,
-                json_agg(json_build_object('name', i.name, 'variant', iv.color, 'unit', ji.unit, 'qty', ji.qty) ORDER BY ji.id) AS lines
-         FROM job_issues ji
-         JOIN jobs j ON j.id = ji.job_id JOIN karigars k ON k.id = j.karigar_id
-         JOIN items i ON i.id = ji.item_id
-         LEFT JOIN item_variants iv ON iv.id = ji.variant_id
-         WHERE ji.issued_on = COALESCE($1::date, CURRENT_DATE)
-         GROUP BY j.id, k.name ORDER BY j.id DESC`, [d]),
+        `SELECT e.id, k.name AS party, e.remark,
+                json_agg(json_build_object(
+                  'name', COALESCE(i.name, pr.name), 'variant',
+                  NULLIF(CONCAT_WS(' · ', l.size, l.design), ''),
+                  'unit', '', 'qty', l.qty) ORDER BY l.id) AS lines
+         FROM karigar_entries e
+         JOIN karigars k ON k.id = e.karigar_id
+         JOIN karigar_entry_lines l ON l.entry_id = e.id
+         LEFT JOIN items i ON i.id = l.item_id
+         LEFT JOIN products pr ON pr.id = l.product_id
+         WHERE e.direction = 'out' AND e.entry_date = COALESCE($1::date, CURRENT_DATE)
+         GROUP BY e.id, k.name, e.remark ORDER BY e.id DESC`, [d]),
 
       query(
-        `SELECT j.id, k.name AS party,
-                json_agg(json_build_object('name', pr.name, 'variant', pv.variant, 'unit', 'pcs', 'qty', jr.qty) ORDER BY jr.id) AS lines
-         FROM job_receipts jr
-         JOIN jobs j ON j.id = jr.job_id JOIN karigars k ON k.id = j.karigar_id
-         JOIN products pr ON pr.id = jr.product_id
-         LEFT JOIN product_variants pv ON pv.id = jr.variant_id
-         WHERE jr.received_on = COALESCE($1::date, CURRENT_DATE)
-         GROUP BY j.id, k.name ORDER BY j.id DESC`, [d]),
-
-      query(
-        `SELECT j.id, k.name AS party,
-                json_agg(json_build_object('name', i.name, 'variant', iv.color, 'unit', sm.unit, 'qty', ABS(sm.qty)) ORDER BY sm.id) AS lines
-         FROM stock_movements sm
-         JOIN jobs j ON j.id = sm.ref_id JOIN karigars k ON k.id = j.karigar_id
-         JOIN items i ON i.id = sm.item_id
-         LEFT JOIN item_variants iv ON iv.id = sm.variant_id
-         WHERE sm.reason = 'job_return' AND sm.moved_on = COALESCE($1::date, CURRENT_DATE)
-         GROUP BY j.id, k.name ORDER BY j.id DESC`, [d]),
+        `SELECT e.id, k.name AS party, e.remark,
+                json_agg(json_build_object(
+                  'name', COALESCE(i.name, pr.name), 'variant',
+                  NULLIF(CONCAT_WS(' · ', l.size, l.design), ''),
+                  'unit', '', 'qty', l.qty) ORDER BY l.id) AS lines
+         FROM karigar_entries e
+         JOIN karigars k ON k.id = e.karigar_id
+         JOIN karigar_entry_lines l ON l.entry_id = e.id
+         LEFT JOIN items i ON i.id = l.item_id
+         LEFT JOIN products pr ON pr.id = l.product_id
+         WHERE e.direction = 'in' AND e.entry_date = COALESCE($1::date, CURRENT_DATE)
+         GROUP BY e.id, k.name, e.remark ORDER BY e.id DESC`, [d]),
 
       query(
         `SELECT pay.id, pay.amount, pay.method, pay.party_type, pay.ref_note,
@@ -283,7 +281,9 @@ reportsRouter.get(
                   WHEN 'karigar' THEN (SELECT name FROM karigars WHERE id = pay.party_id)
                   ELSE (SELECT COALESCE(name, mobile) FROM customers WHERE id = pay.party_id) END AS party,
                 COALESCE('Bill ' || (SELECT bill_no FROM purchases WHERE id = pay.purchase_id),
-                         'Job #' || pay.job_id) AS against
+                         'Job #' || pay.job_id,
+                         (SELECT COALESCE(NULLIF(remark, ''), 'Entry')
+                            FROM karigar_entries WHERE id = pay.karigar_entry_id)) AS against
          FROM payments pay
          WHERE pay.pay_date = COALESCE($1::date, CURRENT_DATE)
          ORDER BY pay.id DESC`, [d]),
@@ -306,15 +306,11 @@ reportsRouter.get(
         amount: Number(r.amount), lines: (r.lines ?? []) as Line[], note: null,
       })),
       ...issues.rows.map((r: any) => ({
-        kind: 'issue' as const, id: r.id, party: r.party, ref: `Job #${r.id}`,
+        kind: 'issue' as const, id: r.id, party: r.party, ref: r.remark || 'Material out',
         amount: null, lines: (r.lines ?? []) as Line[], note: null,
       })),
       ...receipts.rows.map((r: any) => ({
-        kind: 'receipt' as const, id: r.id, party: r.party, ref: `Job #${r.id}`,
-        amount: null, lines: (r.lines ?? []) as Line[], note: null,
-      })),
-      ...returns.rows.map((r: any) => ({
-        kind: 'return' as const, id: r.id, party: r.party, ref: `Job #${r.id}`,
+        kind: 'receipt' as const, id: r.id, party: r.party, ref: r.remark || 'Item in',
         amount: null, lines: (r.lines ?? []) as Line[], note: null,
       })),
       ...payments.rows.map((r: any) => ({
@@ -335,7 +331,6 @@ reportsRouter.get(
           purchases: purchases.rowCount ?? 0,
           issues: issues.rowCount ?? 0,
           receipts: receipts.rowCount ?? 0,
-          returns: returns.rowCount ?? 0,
           payments: payments.rowCount ?? 0,
           adjustments: adjustments.rowCount ?? 0,
         },

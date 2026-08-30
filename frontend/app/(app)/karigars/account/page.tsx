@@ -134,18 +134,14 @@ export default function KarigarAccountPage() {
         .join(" ").toLowerCase().includes(term));
   }, [log, term]);
 
-  // Each column is its own stack, oldest first so the newest sits at its bottom.
-  // The API returns newest first because that is what a log wants; the columns
-  // read the other way because the owner fills them downward.
-  const oldestFirst = useMemo(() => [...entries].reverse(), [entries]);
-  const ins = useMemo(() => oldestFirst.filter((e) => e.direction === "in"), [oldestFirst]);
-  const outs = useMemo(() => oldestFirst.filter((e) => e.direction === "out"), [oldestFirst]);
+  // Newest at the top of every column. The API already returns the log that way;
+  // this used to reverse it so a column read like a page being filled downward,
+  // but what the owner actually opens the khata for is the entry just made.
+  const ins = useMemo(() => entries.filter((e) => e.direction === "in"), [entries]);
+  const outs = useMemo(() => entries.filter((e) => e.direction === "out"), [entries]);
   // Money is its own stack: a payment attached to a movement and a lump sum with
   // no movement both belong here, and neither should appear twice.
-  const money = useMemo(
-    () => oldestFirst.flatMap((e) => e.payments),
-    [oldestFirst],
-  );
+  const money = useMemo(() => entries.flatMap((e) => e.payments), [entries]);
 
   const hasFilter = !!from || !!to || !!search;
   const paidShown = money.reduce((n, p) => n + p.amount, 0);
@@ -172,9 +168,16 @@ export default function KarigarAccountPage() {
         title={karigar?.name ?? "Karigar account"}
         subtitle={karigar ? [karigar.phone, karigar.product_types?.join(", ")].filter(Boolean).join(" · ") || undefined : undefined}
         actions={karigarId ? (
-          <Button variant="outline" onClick={() => setEditKarigar(true)} title="Karigar details">
-            <Icon.Edit /> <span className="hidden lg:inline">Details</span>
-          </Button>
+          <>
+            <span className="flex items-center gap-1.5 lg:hidden">
+              <StackButton onClick={() => setEntryForm("in")} label="+ In" aria="Record goods coming in" className="bg-[color:var(--success)] text-white" />
+              <StackButton onClick={() => setEntryForm("out")} label="+ Out" aria="Issue material out" className="bg-[color:var(--accent)] text-white" />
+              <StackButton onClick={() => setPayOpen(true)} label="+ Pay" aria="Record a payment" className="bg-primary text-primary-fg" />
+            </span>
+            <Button variant="outline" onClick={() => setEditKarigar(true)} title="Karigar details">
+              <Icon.Edit /> <span className="hidden lg:inline">Details</span>
+            </Button>
+          </>
         ) : undefined}
       />
 
@@ -222,7 +225,7 @@ export default function KarigarAccountPage() {
               headClass="khata-head-in"
               bodyClass="khata-col-in"
               action={
-                <StackButton onClick={() => setEntryForm("in")} label="+ In" aria="Record goods coming in" className="bg-[color:var(--success)] text-white" />
+                <span className="hidden lg:inline-flex"><StackButton onClick={() => setEntryForm("in")} label="+ In" aria="Record goods coming in" className="bg-[color:var(--success)] text-white" /></span>
               }
               empty="Nothing received in this range."
             >
@@ -236,7 +239,7 @@ export default function KarigarAccountPage() {
               headClass="khata-head-raw"
               bodyClass="khata-col-raw"
               action={
-                <StackButton onClick={() => setEntryForm("out")} label="+ Out" aria="Issue material out" className="bg-[color:var(--accent)] text-white" />
+                <span className="hidden lg:inline-flex"><StackButton onClick={() => setEntryForm("out")} label="+ Out" aria="Issue material out" className="bg-[color:var(--accent)] text-white" /></span>
               }
               empty="Nothing issued in this range."
             >
@@ -254,7 +257,7 @@ export default function KarigarAccountPage() {
               headClass="khata-head-pay"
               bodyClass="khata-col-pay"
               action={
-                <StackButton onClick={() => setPayOpen(true)} label="+ Pay" aria="Record a payment" className="bg-primary text-primary-fg" />
+                <span className="hidden lg:inline-flex"><StackButton onClick={() => setPayOpen(true)} label="+ Pay" aria="Record a payment" className="bg-primary text-primary-fg" /></span>
               }
               empty="No payment in this range."
             >
