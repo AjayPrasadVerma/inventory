@@ -109,7 +109,15 @@ export const catalogueRepo = {
       // % and _ are LIKE wildcards: unescaped, a search for "%" returns everything
       // and no index can be used.
       params.push(`%${opts.search.replace(/[\\%_]/g, '\\$&')}%`);
-      where.push(`c.name ILIKE $${params.length} ESCAPE '\\'`);
+      // Size and design are what the owner actually remembers about a box — "21x11",
+      // "Line L Red" — so searching only the name made them hunt. units holds the
+      // sizes for raw material, variants the designs; for a finished product the
+      // variant label is the size and design composed, so both are covered.
+      where.push(`(
+        c.name ILIKE $${params.length} ESCAPE '\\'
+        OR array_to_string(c.units, ' ') ILIKE $${params.length} ESCAPE '\\'
+        OR array_to_string(c.variants, ' ') ILIKE $${params.length} ESCAPE '\\'
+      )`);
     }
     if (opts.category) {
       params.push(opts.category);

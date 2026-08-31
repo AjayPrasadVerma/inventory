@@ -80,7 +80,7 @@ export function CatalogueSheetModal({
   const { toast } = useToast();
   const editing = record != null;
 
-  const [kind, setKind] = useState<Kind>(record?.kind ?? "item");
+  const [kind, setKind] = useState<Kind>(record?.kind ?? "product");
   const [date, setDate] = useState(todayISO());
   const [lines, setLines] = useState<SheetRow[]>(() => {
     if (!record) return Array.from({ length: BLANK_ROWS }, blank);
