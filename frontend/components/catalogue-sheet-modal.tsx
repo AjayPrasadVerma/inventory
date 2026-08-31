@@ -157,30 +157,24 @@ export function CatalogueSheetModal({
     setBadRows(new Set());
     setSaving(true);
     try {
-      // Changing the type moves the record — and its stock — to the other
-      // catalogue, so it happens first and everything after it applies to the
-      // record in its new home.
-      let targetId = record?.id ?? 0;
-      if (editing && kind !== record.kind) {
-        const moved = await api<{ data: { id: number } }>(
-          `/catalogue/${record.kind}/${record.id}/convert`,
-          { method: "PUT", body: { on_date: date } },
-        );
-        targetId = moved.data.id;
-      }
+      const sheetLines = named.map((l) => ({
+        size: String(l.size).trim() || null,
+        design: String(l.design).trim() || null,
+        qty: String(l.qty).trim() === "" ? null : Number(l.qty),
+      }));
 
-      if (editing) {
-        await api(`/catalogue/${kind}/${targetId}/sheet`, {
+      if (editing && kind !== record.kind) {
+        // One call, one transaction. Splitting the move from the edit meant a
+        // failed edit left the record already moved and its old stock deleted,
+        // with the screen showing only an error.
+        await api(`/catalogue/${record.kind}/${record.id}/convert`, {
           method: "PUT",
-          body: {
-            name: record.name,
-            on_date: date,
-            lines: named.map((l) => ({
-              size: String(l.size).trim() || null,
-              design: String(l.design).trim() || null,
-              qty: String(l.qty).trim() === "" ? null : Number(l.qty),
-            })),
-          },
+          body: { on_date: date, sheet: { name: record.name, lines: sheetLines } },
+        });
+      } else if (editing) {
+        await api(`/catalogue/${kind}/${record.id}/sheet`, {
+          method: "PUT",
+          body: { name: record.name, on_date: date, lines: sheetLines },
         });
       } else {
         await api("/catalogue/bulk", {

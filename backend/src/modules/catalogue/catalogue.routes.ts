@@ -99,6 +99,12 @@ catalogueRouter.put(
   asyncHandler(async (req, res) => {
     const input = z.object({
       on_date: pastOrTodayDateSchema.optional().nullable(),
+      // The rest of the edit rides along so the move and the edit commit or fail
+      // together. Same line shape as the sheet route.
+      sheet: z.object({
+        name: z.string().trim().min(1).max(200),
+        lines: editSheetSchema.shape.lines,
+      }).optional().nullable(),
     }).parse(req.body);
     const out = await convertCatalogueKind({
       ...input, from: kindParam.parse(req.params.kind), id: parseId(req.params.id),

@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import { query, withTransaction } from '../../config/db.js';
 import { AppError } from '../../utils/http.js';
 import {
@@ -224,14 +225,32 @@ export async function addCatalogueLines(input: {
  * deletion: the size and design stay in the catalogue and every movement stays in
  * the ledger. History is not the owner's to lose by clearing a line.
  */
-export async function editCatalogueFromSheet(input: {
+export interface SheetEdit {
   kind: 'item' | 'product';
   id: number;
   name: string;
   on_date?: string | null;
   lines: { size?: string | null; design?: string | null; qty?: number | null }[];
-}): Promise<{ adjusted: number }> {
-  return withTransaction(async (client) => {
+}
+
+export async function editCatalogueFromSheet(input: SheetEdit): Promise<{ adjusted: number }> {
+  return withTransaction((client) => applySheet(client, input));
+}
+
+/**
+ * The sheet is the whole picture of a record, not a patch: what it shows is what
+ * the record should look like afterwards. So a bucket the owner deleted from it
+ * is emptied, not ignored — the ✕ used to remove the row on screen and change
+ * nothing, and the save still said "Saved".
+ *
+ * Emptied rather than deleted: the movements that built the bucket are history
+ * and stay, so the correction is another movement bringing it to zero.
+ */
+export async function applySheet(
+  client: PoolClient,
+  input: SheetEdit,
+): Promise<{ adjusted: number }> {
+  {
     // The kind has to come from the caller and cannot be worked out from the id:
     // items and products are separate sequences, so one id routinely exists in
     // both. Deriving it by checking one table first looked safer and was worse —
@@ -326,8 +345,52 @@ export async function editCatalogueFromSheet(input: {
       }
     }
 
+    // Buckets the sheet no longer mentions are emptied. Keyed exactly as the
+    // display groups them, so what disappeared on screen is what goes to zero.
+    const seen = new Set<string>();
+    for (const line of input.lines) {
+      const size = (line.size ?? '').trim();
+      const design = (line.design ?? '').trim();
+      seen.add(`${kind === 'item' ? (size || 'pcs') : size}::${design}`);
+    }
+
+    const existing = kind === 'item'
+      ? (await client.query<{ size: string; design: string | null; q: string }>(
+          `SELECT sm.unit AS size, iv.color AS design, SUM(sm.qty)::text AS q
+           FROM stock_movements sm
+           LEFT JOIN item_variants iv ON iv.id = sm.variant_id
+           WHERE sm.item_id = $1 GROUP BY sm.unit, iv.color`, [input.id])).rows
+      : (await client.query<{ size: string | null; design: string | null; q: string }>(
+          `SELECT pv.size, pv.design, SUM(f.qty)::text AS q
+           FROM finished_stock_movements f
+           LEFT JOIN product_variants pv ON pv.id = f.variant_id
+           WHERE f.product_id = $1 GROUP BY pv.size, pv.design`, [input.id])).rows;
+
+    for (const b of existing) {
+      const size = (b.size ?? '').trim();
+      const design = (b.design ?? '').trim();
+      if (seen.has(`${size}::${design}`)) continue;
+      const cur = Number(b.q ?? 0);
+      if (cur === 0) continue;
+
+      if (kind === 'item') {
+        const { unit, variantId } = await resolveRawParts(client, input.id, { size, design });
+        await client.query(
+          `INSERT INTO stock_movements (item_id, variant_id, unit, qty, reason, moved_on, note)
+           VALUES ($1,$2,$3,$4,'adjustment', COALESCE($5, CURRENT_DATE), 'Removed from the sheet')`,
+          [input.id, variantId, unit, -cur, input.on_date ?? null]);
+      } else {
+        const { variantId } = await resolveFinishedParts(client, input.id, { size, design });
+        await client.query(
+          `INSERT INTO finished_stock_movements (product_id, variant_id, qty, reason, moved_on, note)
+           VALUES ($1,$2,$3,'adjustment', COALESCE($4, CURRENT_DATE), 'Removed from the sheet')`,
+          [input.id, variantId, -cur, input.on_date ?? null]);
+      }
+      adjusted += 1;
+    }
+
     return { adjusted };
-  });
+  }
 }
 
 /**
@@ -352,6 +415,16 @@ export async function convertCatalogueKind(input: {
   from: 'item' | 'product';
   id: number;
   on_date?: string | null;
+  /**
+   * The rest of the edit, applied to the moved record in this same transaction.
+   *
+   * It used to be a second HTTP call. When that call failed — most often because
+   * the name already existed in the destination catalogue, which is exactly why
+   * someone changes a type — the conversion had already committed: the old record
+   * and its stock were gone, and the screen showed an error over a list that still
+   * said the record was there. There was no way forward from that dialog.
+   */
+  sheet?: { name: string; lines: SheetEdit['lines'] } | null;
 }): Promise<{ id: number; kind: 'item' | 'product' }> {
   return withTransaction(async (client) => {
     // See editCatalogueFromSheet: the id alone does not say which catalogue, so
@@ -452,6 +525,18 @@ export async function convertCatalogueKind(input: {
       await client.query(`DELETE FROM product_variants WHERE product_id = $1`, [input.id]);
     }
     await client.query(`DELETE FROM ${fromTable} WHERE id = $1`, [input.id]);
+
+    // Same transaction: a rename that clashes rolls the move back with it, so the
+    // owner is returned to exactly what they had rather than to a half-done state.
+    if (input.sheet) {
+      await applySheet(client, {
+        kind: toKind,
+        id: newId,
+        name: input.sheet.name,
+        on_date: input.on_date ?? null,
+        lines: input.sheet.lines,
+      });
+    }
 
     return { id: newId, kind: toKind };
   });

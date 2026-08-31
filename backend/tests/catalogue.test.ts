@@ -9,7 +9,7 @@
  */
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from 'vitest';
 import { migrate, reset, pool, query } from './helpers/db.js';
-import { seedFixtures, finishedOnHand, type Fixtures } from './helpers/fixtures.js';
+import { seedFixtures, finishedOnHand, rawOnHand, type Fixtures } from './helpers/fixtures.js';
 import { assertCatalogueLines } from '../src/utils/catalogue.js';
 import {
   addCatalogueLines, convertCatalogueKind, editCatalogueFromSheet,
@@ -529,5 +529,96 @@ describe('the convert guard covers movements, not just tables', () => {
     // the owner cannot find.
     await editCatalogueFromSheet({ kind: 'item', id, name: 'Ghost', lines: [] });
     expect((await query<{ name: string }>(`SELECT name FROM items WHERE id=$1`, [id])).rows[0]!.name).toBe('Ghost');
+  });
+});
+
+/** addCatalogueLines returns counts, not ids — the name is how it is found. */
+async function idOf(table: 'items' | 'products', name: string): Promise<number> {
+  const r = await query<{ id: number }>(
+    `SELECT id FROM ${table} WHERE lower(name) = lower($1)`, [name]);
+  return r.rows[0]!.id;
+}
+
+describe('the sheet is the whole picture', () => {
+  it('empties a bucket the owner deleted from the sheet', async () => {
+    await addCatalogueLines({
+      kind: 'item',
+      lines: [
+        { name: 'Sheet Drop', size: 'meter', design: 'Red', qty: 10 },
+        { name: 'Sheet Drop', size: 'meter', design: 'Blue', qty: 4 },
+      ],
+    });
+    const id = await idOf('items', 'Sheet Drop');
+    expect(await rawOnHand(id, 'meter')).toBe(14);
+
+    // Save the sheet back with only the Red line — Blue was removed on screen.
+    await editCatalogueFromSheet({
+      kind: 'item', id, name: 'Sheet Drop',
+      lines: [{ size: 'meter', design: 'Red', qty: 10 }],
+    });
+
+    // Red untouched, Blue brought to zero rather than silently left alone.
+    expect(await rawOnHand(id, 'meter')).toBe(10);
+    const blue = await query<{ q: string }>(
+      `SELECT COALESCE(SUM(sm.qty),0)::text AS q FROM stock_movements sm
+       JOIN item_variants iv ON iv.id = sm.variant_id
+       WHERE sm.item_id = $1 AND iv.color = 'Blue'`, [id]);
+    expect(Number(blue.rows[0]!.q)).toBe(0);
+  });
+
+  it('leaves a bucket alone when the sheet still lists it with a blank quantity', async () => {
+    await addCatalogueLines({
+      kind: 'item', lines: [{ name: 'Sheet Keep', size: 'meter', qty: 7 }],
+    });
+    const id = await idOf('items', 'Sheet Keep');
+    await editCatalogueFromSheet({
+      kind: 'item', id, name: 'Sheet Keep',
+      lines: [{ size: 'meter', design: null, qty: null }],
+    });
+    expect(await rawOnHand(id, 'meter')).toBe(7);
+  });
+});
+
+describe('type change is all-or-nothing', () => {
+  it('rolls the move back when the rename that rides with it collides', async () => {
+    // A product already answers to this name — the usual reason to change a type.
+    await addCatalogueLines({ kind: 'product', lines: [{ name: 'Clash Box', size: '2x3', qty: 1 }] });
+    await addCatalogueLines({
+      kind: 'item', lines: [{ name: 'Clash Raw', size: 'meter', qty: 5 }],
+    });
+    const rawId = await idOf('items', 'Clash Raw');
+
+    await expect(convertCatalogueKind({
+      from: 'item', id: rawId,
+      sheet: { name: 'Clash Box', lines: [{ size: 'meter', design: null, qty: 5 }] },
+    })).rejects.toThrow();
+
+    // The raw record and its stock must still be exactly where they were.
+    const still = await query(`SELECT 1 FROM items WHERE id = $1`, [rawId]);
+    expect(still.rowCount).toBe(1);
+    expect(await rawOnHand(rawId, 'meter')).toBe(5);
+    // And no orphan was left on the far side.
+    const orphans = await query(
+      `SELECT 1 FROM products WHERE lower(name) = 'clash raw'`);
+    expect(orphans.rowCount).toBe(0);
+  });
+
+  it('moves the record and its stock when the sheet rides along cleanly', async () => {
+    await addCatalogueLines({
+      kind: 'item', lines: [{ name: 'Move Me', size: '2x3', design: 'Gold', qty: 12 }],
+    });
+    const rawId = await idOf('items', 'Move Me');
+
+    const moved = await convertCatalogueKind({
+      from: 'item', id: rawId,
+      sheet: { name: 'Move Me', lines: [{ size: '2x3', design: 'Gold', qty: 12 }] },
+    });
+    expect(moved.kind).toBe('product');
+
+    expect(await finishedOnHand(moved.id)).toBe(12);
+    const gone = await query(`SELECT 1 FROM items WHERE id = $1`, [rawId]);
+    expect(gone.rowCount).toBe(0);
+    const leftover = await query(`SELECT 1 FROM stock_movements WHERE item_id = $1`, [rawId]);
+    expect(leftover.rowCount).toBe(0);
   });
 });
