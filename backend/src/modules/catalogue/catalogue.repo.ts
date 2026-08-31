@@ -324,7 +324,8 @@ export async function applySheet(
           variantId = found.rows[0]?.id
             ?? (await client.query<{ id: number }>(
               `INSERT INTO product_variants (product_id, variant, size, design) VALUES ($1,$2,$3,$4)
-               ON CONFLICT (product_id, variant) DO UPDATE SET size = EXCLUDED.size, design = EXCLUDED.design
+               ON CONFLICT (product_id, COALESCE(size, ''), COALESCE(design, ''))
+               DO UPDATE SET variant = EXCLUDED.variant
                RETURNING id`,
               [input.id, label, size || null, design || null])).rows[0]!.id;
         }

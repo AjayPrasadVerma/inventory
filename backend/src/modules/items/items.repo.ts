@@ -1,5 +1,6 @@
 import { query, withTransaction } from '../../config/db.js';
 import { likeTerm } from '../../utils/sql.js';
+import { AppError } from '../../utils/http.js';
 
 export interface ItemRow {
   id: number;
@@ -158,7 +159,20 @@ export const itemsRepo = {
     return this.findById(id);
   },
 
+  /**
+   * Hiding a record that still holds stock is what let the shop lose track of it:
+   * the catalogue stopped showing it while every stock report kept counting it,
+   * and retyping the name made a second row, so the reports then showed two lines
+   * for one material. Refuse instead, and say what has to happen first.
+   */
   async softDelete(id: number): Promise<boolean> {
+    const held = await query<{ unit: string; q: string }>(
+      `SELECT unit, SUM(qty)::text AS q FROM stock_movements
+       WHERE item_id = $1 GROUP BY unit HAVING SUM(qty) <> 0`, [id]);
+    if (held.rowCount) {
+      const what = held.rows.map((r) => `${r.q} ${r.unit}`).join(', ');
+      throw new AppError(409, `Still holding ${what}. Set the stock to 0 in Edit before removing it.`);
+    }
     const res = await query('UPDATE items SET is_active=FALSE, updated_at=now() WHERE id=$1', [id]);
     return (res.rowCount ?? 0) > 0;
   },

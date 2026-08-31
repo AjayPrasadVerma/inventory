@@ -24,18 +24,33 @@ export interface TypedLine {
   design?: string | null;
 }
 
-/** Case-insensitive find, else insert. Returns the catalogue row's id. */
+/**
+ * Case-insensitive find, else revive, else insert.
+ *
+ * Removing a record only hides it, so a name that was removed and later typed
+ * again used to make a second row: the catalogue showed one and the stock
+ * reports — which do not filter on is_active — counted both. Bringing the hidden
+ * row back keeps one row per name instead of accumulating namesakes.
+ */
 export async function findOrCreateCatalogue(
   client: PoolClient,
   kind: CatalogueKind,
   name: string,
 ): Promise<number> {
   const table = kind === 'item' ? 'items' : 'products';
-  const found = await client.query<{ id: number }>(
-    `SELECT id FROM ${table} WHERE lower(name) = lower($1) AND is_active LIMIT 1`,
+  // Active first: if both exist, the visible one is the one being referred to.
+  const found = await client.query<{ id: number; is_active: boolean }>(
+    `SELECT id, is_active FROM ${table} WHERE lower(name) = lower($1)
+     ORDER BY is_active DESC, id LIMIT 1`,
     [name],
   );
-  if (found.rows[0]) return found.rows[0].id;
+  const hit = found.rows[0];
+  if (hit?.is_active) return hit.id;
+  if (hit) {
+    await client.query(
+      `UPDATE ${table} SET is_active = TRUE, updated_at = now() WHERE id = $1`, [hit.id]);
+    return hit.id;
+  }
   const made = await client.query<{ id: number }>(
     `INSERT INTO ${table} (name) VALUES ($1) RETURNING id`,
     [name],
@@ -130,7 +145,8 @@ export async function resolveFinishedParts(
   const made = await client.query<{ id: number }>(
     `INSERT INTO product_variants (product_id, variant, size, design)
      VALUES ($1,$2,$3,$4)
-     ON CONFLICT (product_id, variant) DO UPDATE SET size = EXCLUDED.size, design = EXCLUDED.design
+     ON CONFLICT (product_id, COALESCE(size, ''), COALESCE(design, ''))
+     DO UPDATE SET variant = EXCLUDED.variant
      RETURNING id`,
     [productId, label, size || null, design || null],
   );
