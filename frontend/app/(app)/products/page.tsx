@@ -179,7 +179,9 @@ export default function CataloguePage() {
                         </td>
                         <td onClick={(e) => e.stopPropagation()}>
                           <div className="flex justify-end gap-1.5">
-                            <button onClick={() => setEditing(r)} className="inline-flex cursor-pointer items-center rounded-md bg-surface-2 px-2.5 text-xs font-medium text-ink transition-colors hover:bg-border-strong">Edit</button>
+                            {user?.role === "owner" && (
+                              <button onClick={() => setEditing(r)} className="inline-flex cursor-pointer items-center rounded-md bg-surface-2 px-2.5 text-xs font-medium text-ink transition-colors hover:bg-border-strong">Edit</button>
+                            )}
                             {user?.role === "owner" && (
                               <button onClick={() => setDeleting(r)} className="inline-flex cursor-pointer items-center rounded-md bg-surface-2 px-2.5 text-xs font-medium text-muted transition-colors hover:bg-[color:var(--danger)] hover:text-white">Delete</button>
                             )}

@@ -16,6 +16,7 @@ import {
 } from '../src/modules/catalogue/catalogue.repo.js';
 import { karigarEntriesRepo } from '../src/modules/karigar-entries/karigar-entries.repo.js';
 import { productsRepo } from '../src/modules/products/products.repo.js';
+import { itemsRepo } from '../src/modules/items/items.repo.js';
 
 let f: Fixtures;
 /** A second item/product, so we have a variant that provably belongs elsewhere. */
@@ -233,9 +234,13 @@ describe('editing a product keeps size and design apart', () => {
     await productsRepo.update(id, { name: 'Legacy Box', variants: ['Small', 'Large'] });
     const rows = await variantRows(id);
     expect(rows.map((r) => r.variant).sort()).toEqual(['Large', 'Small']);
-    // A bare string carries no parts, and splitting the label to invent some
-    // would be guessing at data the caller never sent.
-    expect(rows.find((r) => r.variant === 'Large')).toMatchObject({ size: null, design: null });
+    // The label becomes the size. Leaving it null read as "no parts", which was
+    // tidier in theory and wrong in practice: identity is (product_id, size,
+    // design), so every bare label collapsed onto ('','') — two of them could not
+    // coexist, and one was a different bucket from "no variant" while the screen
+    // drew them as the same row. Migration 010 already made this same choice for
+    // every row that existed then.
+    expect(rows.find((r) => r.variant === 'Large')).toMatchObject({ size: 'Large', design: null });
   });
 });
 
@@ -620,5 +625,96 @@ describe('type change is all-or-nothing', () => {
     expect(gone.rowCount).toBe(0);
     const leftover = await query(`SELECT 1 FROM stock_movements WHERE item_id = $1`, [rawId]);
     expect(leftover.rowCount).toBe(0);
+  });
+});
+
+describe('what the QA pass found', () => {
+  it('keeps a size-less finished bucket when its quantity is left blank', async () => {
+    // The shop's commonest shape: a name and a count, no size, no design.
+    await addCatalogueLines({ kind: 'product', lines: [{ name: 'Bare Box', qty: 9 }] });
+    const id = await idOf('products', 'Bare Box');
+    expect(await finishedOnHand(id)).toBe(9);
+
+    // The sheet still lists the row; only its quantity was cleared.
+    await editCatalogueFromSheet({
+      kind: 'product', id, name: 'Bare Box',
+      lines: [{ size: null, design: null, qty: null }],
+    });
+    expect(await finishedOnHand(id)).toBe(9);
+  });
+
+  it('refuses two sheet lines for one bucket instead of letting the second win', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Dup Line', size: 'A', qty: 5 }] });
+    const id = await idOf('items', 'Dup Line');
+
+    await expect(editCatalogueFromSheet({
+      kind: 'item', id, name: 'Dup Line',
+      lines: [{ size: 'A', design: null, qty: 5 }, { size: 'A', design: null, qty: 3 }],
+    })).rejects.toThrow(/two lines/i);
+
+    // Nothing was written on the way to the refusal.
+    expect(await rawOnHand(id, 'A')).toBe(5);
+  });
+
+  it('refuses a type change whose lines would collapse onto one bucket', async () => {
+    // A blank size and a literal "pcs" size are two buckets as a product and one
+    // as a raw material, so the second line would have overwritten the first.
+    await addCatalogueLines({
+      kind: 'product',
+      lines: [
+        { name: 'Collapse', size: null, design: 'Red', qty: 10 },
+        { name: 'Collapse', size: 'pcs', design: 'Red', qty: 4 },
+      ],
+    });
+    const id = await idOf('products', 'Collapse');
+    expect(await finishedOnHand(id)).toBe(14);
+
+    await expect(convertCatalogueKind({
+      from: 'product', id,
+      sheet: {
+        name: 'Collapse',
+        lines: [
+          { size: null, design: 'Red', qty: 10 },
+          { size: 'pcs', design: 'Red', qty: 4 },
+        ],
+      },
+    })).rejects.toThrow(/same line/i);
+
+    // Still a product, still holding all fourteen.
+    expect(await finishedOnHand(id)).toBe(14);
+  });
+
+  it('revives a hidden name instead of making a second row', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Revive Me', size: 'meter', qty: 3 }] });
+    const id = await idOf('items', 'Revive Me');
+    // Empty it first — a record still holding stock cannot be removed.
+    await editCatalogueFromSheet({
+      kind: 'item', id, name: 'Revive Me', lines: [{ size: 'meter', design: null, qty: 0 }],
+    });
+    expect(await itemsRepo.softDelete(id)).toBe(true);
+
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'revive me', size: 'meter', qty: 8 }] });
+    const rows = await query(`SELECT id FROM items WHERE lower(name) = 'revive me'`);
+    expect(rows.rowCount).toBe(1);
+    expect(rows.rows[0]!.id).toBe(id);
+    expect(await rawOnHand(id, 'meter')).toBe(8);
+  });
+
+  it('refuses to hide a record that still holds stock', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Still Held', size: 'meter', qty: 6 }] });
+    const id = await idOf('items', 'Still Held');
+    await expect(itemsRepo.softDelete(id)).rejects.toThrow(/still holding/i);
+    const row = await query<{ is_active: boolean }>(`SELECT is_active FROM items WHERE id = $1`, [id]);
+    expect(row.rows[0]!.is_active).toBe(true);
+  });
+
+  it('keeps two bare-label variants apart', async () => {
+    // Both used to carry size NULL, so they shared one identity and 011's merge
+    // would have folded them together.
+    const p = await productsRepo.create({ name: 'Two Labels', variants: ['Small', 'Large'] } as never);
+    const vs = await query<{ variant: string; size: string | null }>(
+      `SELECT variant, size FROM product_variants WHERE product_id = $1 ORDER BY variant`, [p!.id]);
+    expect(vs.rowCount).toBe(2);
+    expect(vs.rows.map((r) => r.size)).toEqual(['Large', 'Small']);
   });
 });

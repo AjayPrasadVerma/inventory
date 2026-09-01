@@ -275,6 +275,18 @@ export async function applySheet(
 
     await client.query(`UPDATE ${table} SET name = $2, updated_at = now() WHERE id = $1`, [input.id, name]);
 
+    // Reject before touching anything: the owner can see two rows and has to be
+    // told which reading was meant rather than having one silently discarded.
+    const keys = new Set<string>();
+    for (const line of input.lines) {
+      const k = `${(line.size ?? '').trim().toLowerCase()}::${(line.design ?? '').trim().toLowerCase()}`;
+      if (keys.has(k)) {
+        const shown = [(line.size ?? '').trim(), (line.design ?? '').trim()].filter(Boolean).join(' · ') || 'blank';
+        throw new AppError(400, `Two lines for "${shown}" — combine them into one.`);
+      }
+      keys.add(k);
+    }
+
     let adjusted = 0;
     for (const line of input.lines) {
       const size = (line.size ?? '').trim();
@@ -530,6 +542,30 @@ export async function convertCatalogueKind(input: {
     // Same transaction: a rename that clashes rolls the move back with it, so the
     // owner is returned to exactly what they had rather than to a half-done state.
     if (input.sheet) {
+      // The sheet's lines are still in the OLD kind's coordinates, and going
+      // product -> item the mapping (size, design) -> (size || 'pcs', design) is
+      // not one-to-one: a blank size and a literal "pcs" size land on the same
+      // raw bucket. The replay above merges them correctly, then two sheet lines
+      // both address that one bucket and the second overwrites the first — ten
+      // pieces vanished with no error in the case QA found.
+      //
+      // Refused rather than guessed at: only the owner knows whether those were
+      // meant to be one bucket or two, and the answer changes the count.
+      const collapsed = new Map<string, string[]>();
+      for (const l of input.sheet.lines) {
+        const size = (l.size ?? '').trim();
+        const design = (l.design ?? '').trim();
+        const key = `${toKind === 'item' ? (size || 'pcs') : size}::${design}`;
+        const shown = [size || '(blank)', design].filter(Boolean).join(' · ');
+        collapsed.set(key, [...(collapsed.get(key) ?? []), shown]);
+      }
+      const clash = [...collapsed.values()].find((v) => v.length > 1);
+      if (clash) {
+        throw new AppError(409,
+          `${clash.join(' and ')} would become the same line after the change. ` +
+          'Combine them first, then change the type.');
+      }
+
       await applySheet(client, {
         kind: toKind,
         id: newId,

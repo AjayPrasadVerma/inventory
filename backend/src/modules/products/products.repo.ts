@@ -241,10 +241,14 @@ async function replaceVariants(client: import('pg').PoolClient, productId: numbe
     const label = variantLabel(raw);
     if (!label || seen.has(label.toLowerCase())) continue;
     seen.add(label.toLowerCase());
-    // A pair keeps its parts; a bare string has none to keep, and inventing them
-    // by splitting the label would guess at data the caller never sent.
+    // A pair keeps its parts. A bare string becomes the size, which is the same
+    // choice migration 010 made for every row that already existed — leaving it
+    // null instead was worse than the guess in two ways: identity is
+    // (product_id, size, design), so two bare variants both landed on ('','')
+    // and could not coexist, and a (null, null) variant is a different bucket
+    // from "no variant" while the screen shows them as one.
     clean.push(typeof raw === 'string'
-      ? { label, size: null, design: null }
+      ? { label, size: label, design: null }
       : { label, size: (raw.size ?? '').trim() || null, design: (raw.design ?? '').trim() || null });
   }
 

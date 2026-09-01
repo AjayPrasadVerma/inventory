@@ -39,7 +39,7 @@ const editSheetSchema = z.object({
     size: z.string().trim().max(60).optional().nullable(),
     design: z.string().trim().max(60).optional().nullable(),
     qty: z.coerce.number().min(-1_000_000).max(1_000_000).optional().nullable(),
-  })).max(200, 'Too many lines').default([]),
+  })).max(200, 'Too many lines'),
 });
 
 const bulkSchema = z.object({
@@ -83,6 +83,7 @@ catalogueRouter.post(
 
 catalogueRouter.put(
   '/:kind/:id/sheet',
+  requireRole('owner'),
   asyncHandler(async (req, res) => {
     const kind = kindParam.parse(req.params.kind);
     const input = editSheetSchema.parse(req.body);

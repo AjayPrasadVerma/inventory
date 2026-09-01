@@ -17,6 +17,14 @@
 -- and is no longer an identity, so a size containing " · " can no longer be
 -- mistaken for a size-and-design pair.
 
+-- ---------- Give every row a real identity before comparing them ----------
+-- A variant created from a bare label carried size NULL and design NULL, so two
+-- distinct labels ("Small", "Large") both reduce to ('','') and the merge below
+-- would fold them into one, destroying a real distinction. 010 already chose
+-- size = variant for the rows that existed then; do the same for any created
+-- since, BEFORE anything is compared or merged.
+UPDATE product_variants SET size = variant WHERE size IS NULL AND design IS NULL;
+
 -- ---------- Merge any rows the old key already let through ----------
 -- Keep the lowest id per real identity and repoint everything that references
 -- the others at it, so no movement or document line is orphaned.
