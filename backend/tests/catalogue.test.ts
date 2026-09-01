@@ -718,3 +718,56 @@ describe('what the QA pass found', () => {
     expect(vs.rows.map((r) => r.size)).toEqual(['Large', 'Small']);
   });
 });
+
+describe('one spelling per thing', () => {
+  it('treats doubled and non-breaking spaces in a name as the same name', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Ring Box', size: 'meter', qty: 5 }] });
+    // A pasted name often arrives with a non-breaking space; a typed one with two.
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Ring  Box', size: 'meter', qty: 2 }] });
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Ring Box', size: 'meter', qty: 1 }] });
+
+    const rows = await query<{ id: number; name: string }>(
+      `SELECT id, name FROM items WHERE lower(name) LIKE 'ring%box'`);
+    expect(rows.rowCount).toBe(1);
+    // Stored normalised, so what the owner sees is one clean spelling.
+    expect(rows.rows[0]!.name).toBe('Ring Box');
+    expect(await rawOnHand(rows.rows[0]!.id, 'meter')).toBe(8);
+  });
+
+  it('keeps one bucket when a unit or colour is typed in another case', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Case Velvet', size: 'meter', design: 'Red', qty: 10 }] });
+    const id = await idOf('items', 'Case Velvet');
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Case Velvet', size: 'METER', design: 'red', qty: 5 }] });
+
+    const units = await query(`SELECT 1 FROM item_units WHERE item_id = $1`, [id]);
+    const colours = await query(`SELECT 1 FROM item_variants WHERE item_id = $1`, [id]);
+    expect(units.rowCount).toBe(1);
+    expect(colours.rowCount).toBe(1);
+    // One bucket holding both, under the spelling recorded first.
+    expect(await rawOnHand(id, 'meter')).toBe(15);
+  });
+
+  it('keeps one finished variant when size or design is typed in another case', async () => {
+    await addCatalogueLines({ kind: 'product', lines: [{ name: 'Case Box', size: '2x3', design: 'Floral', qty: 4 }] });
+    const id = await idOf('products', 'Case Box');
+    await addCatalogueLines({ kind: 'product', lines: [{ name: 'Case Box', size: '2X3', design: 'FLORAL', qty: 6 }] });
+
+    const vs = await query<{ variant: string }>(
+      `SELECT variant FROM product_variants WHERE product_id = $1`, [id]);
+    expect(vs.rowCount).toBe(1);
+    expect(vs.rows[0]!.variant).toBe('2x3 · Floral');
+    expect(await finishedOnHand(id)).toBe(10);
+  });
+
+  it('does not invent a unit for a blank line setting a bucket to 0', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'No Phantom', size: 'sheet', qty: 1 }] });
+    const id = await idOf('items', 'No Phantom');
+    await editCatalogueFromSheet({
+      kind: 'item', id, name: 'No Phantom',
+      lines: [{ size: 'sheet', design: null, qty: 1 }, { size: null, design: null, qty: 0 }],
+    });
+    const units = await query<{ unit: string }>(
+      `SELECT unit FROM item_units WHERE item_id = $1`, [id]);
+    expect(units.rows.map((u) => u.unit)).toEqual(['sheet']);
+  });
+});

@@ -296,26 +296,19 @@ export async function applySheet(
       // paints it red, and the sheet has to be able to hand back what it showed.
 
       if (kind === 'item') {
-        // Nothing to do for a line that names no size and sets no quantity —
-        // creating a 'pcs' unit here added one the owner never typed.
-        if (!size && qty == null) continue;
-        const unit = size || 'pcs';
-        await client.query(
-          `INSERT INTO item_units (item_id, unit) VALUES ($1,$2) ON CONFLICT (item_id, unit) DO NOTHING`,
-          [input.id, unit]);
-        let variantId: number | null = null;
-        if (design) {
-          await client.query(
-            `INSERT INTO item_variants (item_id, color) VALUES ($1,$2) ON CONFLICT (item_id, color) DO NOTHING`,
-            [input.id, design]);
-          variantId = (await client.query<{ id: number }>(
-            `SELECT id FROM item_variants WHERE item_id = $1 AND color = $2`, [input.id, design])).rows[0]?.id ?? null;
-        }
+        // A line that names no size invents one ('pcs'), so it only earns that
+        // when it is actually saying something. Setting a bucket to 0 that never
+        // existed says nothing — and used to leave a unit behind that the owner
+        // never typed, which then survived the zeroing pass forever.
+        if (!size && (qty == null || qty === 0)) continue;
+        // Shared with the karigar and purchase sheets, so all three agree on what
+        // counts as the same unit and the same colour.
+        const { unit, variantId } = await resolveRawParts(client, input.id, { size, design });
         if (qty == null) continue;
 
         const cur = Number((await client.query<{ q: string | null }>(
           `SELECT SUM(qty)::text AS q FROM stock_movements
-           WHERE item_id = $1 AND unit = $2 AND variant_id IS NOT DISTINCT FROM $3`,
+           WHERE item_id = $1 AND lower(unit) = lower($2) AND variant_id IS NOT DISTINCT FROM $3`,
           [input.id, unit, variantId])).rows[0]?.q ?? 0);
         const delta = Number((qty - cur).toFixed(3));
         if (delta !== 0) {
@@ -326,21 +319,7 @@ export async function applySheet(
           adjusted += 1;
         }
       } else {
-        let variantId: number | null = null;
-        if (size || design) {
-          const label = [size, design].filter(Boolean).join(' · ');
-          const found = await client.query<{ id: number }>(
-            `SELECT id FROM product_variants
-             WHERE product_id = $1 AND COALESCE(size,'') = $2 AND COALESCE(design,'') = $3 LIMIT 1`,
-            [input.id, size, design]);
-          variantId = found.rows[0]?.id
-            ?? (await client.query<{ id: number }>(
-              `INSERT INTO product_variants (product_id, variant, size, design) VALUES ($1,$2,$3,$4)
-               ON CONFLICT (product_id, COALESCE(size, ''), COALESCE(design, ''))
-               DO UPDATE SET variant = EXCLUDED.variant
-               RETURNING id`,
-              [input.id, label, size || null, design || null])).rows[0]!.id;
-        }
+        const { variantId } = await resolveFinishedParts(client, input.id, { size, design });
         if (qty == null) continue;
 
         const cur = Number((await client.query<{ q: string | null }>(
