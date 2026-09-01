@@ -39,7 +39,7 @@ const editSheetSchema = z.object({
     size: z.string().trim().max(60).optional().nullable(),
     design: z.string().trim().max(60).optional().nullable(),
     qty: z.coerce.number().min(-1_000_000).max(1_000_000).optional().nullable(),
-  })).max(200, 'Too many lines').default([]),
+  })).max(200, 'Too many lines'),
 });
 
 const bulkSchema = z.object({
@@ -83,6 +83,7 @@ catalogueRouter.post(
 
 catalogueRouter.put(
   '/:kind/:id/sheet',
+  requireRole('owner'),
   asyncHandler(async (req, res) => {
     const kind = kindParam.parse(req.params.kind);
     const input = editSheetSchema.parse(req.body);
@@ -99,6 +100,12 @@ catalogueRouter.put(
   asyncHandler(async (req, res) => {
     const input = z.object({
       on_date: pastOrTodayDateSchema.optional().nullable(),
+      // The rest of the edit rides along so the move and the edit commit or fail
+      // together. Same line shape as the sheet route.
+      sheet: z.object({
+        name: z.string().trim().min(1).max(200),
+        lines: editSheetSchema.shape.lines,
+      }).optional().nullable(),
     }).parse(req.body);
     const out = await convertCatalogueKind({
       ...input, from: kindParam.parse(req.params.kind), id: parseId(req.params.id),

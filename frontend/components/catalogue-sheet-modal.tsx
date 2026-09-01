@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Select } from "@/components/ui/field";
 import { DateField } from "@/components/ui/date-field";
 import { Modal } from "@/components/ui/modal";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { Spinner } from "@/components/ui/misc";
 import {
   BLANK_ROWS, EntrySheet, type SheetColumn, type SheetRow,
@@ -80,19 +81,22 @@ export function CatalogueSheetModal({
   const { toast } = useToast();
   const editing = record != null;
 
-  const [kind, setKind] = useState<Kind>(record?.kind ?? "item");
+  const [kind, setKind] = useState<Kind>(record?.kind ?? "product");
   const [date, setDate] = useState(todayISO());
   const [lines, setLines] = useState<SheetRow[]>(() => {
     if (!record) return Array.from({ length: BLANK_ROWS }, blank);
     // Quantity arrives showing what is on hand, so changing it reads as "make the
     // stock this" — the server books only the difference.
     const rows = record.rows.map((r) => ({
-      key: ++seq, name: record.name, size: r.size ?? "", design: r.design ?? "", qty: String(r.qty),
+      key: ++seq, name: record.name, size: r.size ?? "", design: r.design ?? "",
+      qty: String(r.qty), existing: 1,
     }));
     return rows.length > 0 ? rows : [{ ...blank(), name: record.name }];
   });
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [saving, setSaving] = useState(false);
+  /** Lines whose stock this save would write off, held until the owner agrees. */
+  const [confirmEmpty, setConfirmEmpty] = useState<string[] | null>(null);
   /** Rows a save attempt rejected. A toast alone leaves the owner hunting for
    *  which of fourteen rows it meant. */
   const [badRows, setBadRows] = useState<Set<number>>(() => new Set());
@@ -130,8 +134,12 @@ export function CatalogueSheetModal({
     { field: "qty", label: "Quantity", tint: "qty", numeric: true, align: "right" },
   ], [allNames, allSizes, allDesigns, byName, isRaw, editing]);
 
+  // A row that came from the record always goes back, even blank — clearing its
+  // quantity means "leave this bucket alone", not "delete it". Only the spare
+  // rows below are judged on whether anything was typed into them.
   const named = editing
-    ? lines.filter((l) => ["size", "design", "qty"].some((f) => String(l[f] ?? "").trim()))
+    ? lines.filter((l) => l.existing === 1
+        || ["size", "design", "qty"].some((f) => String(l[f] ?? "").trim()))
     : lines.filter((l) => String(l.name).trim());
 
   async function save() {
@@ -154,33 +162,38 @@ export function CatalogueSheetModal({
       toast("Add at least one line with a name", "error");
       return;
     }
+    if (editing && record) {
+      const kept = new Set(named.map((l) =>
+        `${String(l.size).trim()}::${String(l.design).trim()}`));
+      const emptying = record.rows.filter((r) =>
+        Number(r.qty) !== 0 && !kept.has(`${r.size ?? ""}::${r.design ?? ""}`));
+      if (emptying.length > 0 && !confirmEmpty) {
+        setConfirmEmpty(emptying.map((r) =>
+          `${[r.size, r.design].filter(Boolean).join(" · ") || "no size"} — ${r.qty}`));
+        return;
+      }
+    }
     setBadRows(new Set());
     setSaving(true);
     try {
-      // Changing the type moves the record — and its stock — to the other
-      // catalogue, so it happens first and everything after it applies to the
-      // record in its new home.
-      let targetId = record?.id ?? 0;
-      if (editing && kind !== record.kind) {
-        const moved = await api<{ data: { id: number } }>(
-          `/catalogue/${record.kind}/${record.id}/convert`,
-          { method: "PUT", body: { on_date: date } },
-        );
-        targetId = moved.data.id;
-      }
+      const sheetLines = named.map((l) => ({
+        size: String(l.size).trim() || null,
+        design: String(l.design).trim() || null,
+        qty: String(l.qty).trim() === "" ? null : Number(l.qty),
+      }));
 
-      if (editing) {
-        await api(`/catalogue/${kind}/${targetId}/sheet`, {
+      if (editing && kind !== record.kind) {
+        // One call, one transaction. Splitting the move from the edit meant a
+        // failed edit left the record already moved and its old stock deleted,
+        // with the screen showing only an error.
+        await api(`/catalogue/${record.kind}/${record.id}/convert`, {
           method: "PUT",
-          body: {
-            name: record.name,
-            on_date: date,
-            lines: named.map((l) => ({
-              size: String(l.size).trim() || null,
-              design: String(l.design).trim() || null,
-              qty: String(l.qty).trim() === "" ? null : Number(l.qty),
-            })),
-          },
+          body: { on_date: date, sheet: { name: record.name, lines: sheetLines } },
+        });
+      } else if (editing) {
+        await api(`/catalogue/${kind}/${record.id}/sheet`, {
+          method: "PUT",
+          body: { name: record.name, on_date: date, lines: sheetLines },
         });
       } else {
         await api("/catalogue/bulk", {
@@ -263,6 +276,23 @@ export function CatalogueSheetModal({
         note={editing
           ? <>Quantity is what is on hand — change it to correct the stock, or leave it to keep it.</>
           : <>Quantity is optional — leave it blank to add the name without stock.</>}
+      />
+      <ConfirmDialog
+        open={confirmEmpty !== null}
+        title="Set this stock to zero?"
+        message={
+          <>
+            These lines were removed from the sheet, so their stock will be
+            written off:
+            <span className="mt-2 block font-medium text-ink">
+              {(confirmEmpty ?? []).map((l) => <span key={l} className="block">{l}</span>)}
+            </span>
+          </>
+        }
+        confirmLabel="Set to zero"
+        tone="danger"
+        onConfirm={() => { void save(); }}
+        onClose={() => setConfirmEmpty(null)}
       />
     </Modal>
   );

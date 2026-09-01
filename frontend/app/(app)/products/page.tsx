@@ -56,8 +56,6 @@ export default function CataloguePage() {
 
   const [search, setSearch] = useState("");
   const [kind, setKind] = useState<"" | CatalogueKind>("");
-  const [category, setCategory] = useState("");
-  const [categories, setCategories] = useState<string[]>([]);
 
   const [editing, setEditing] = useState<Row | null>(null);
   const [creating, setCreating] = useState(false);
@@ -65,7 +63,6 @@ export default function CataloguePage() {
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   useEffect(() => {
-    api<{ data: string[] }>("/catalogue/meta/categories").then((r) => setCategories(r.data)).catch(() => {});
   }, []);
 
   // The command palette links here as `?new=1`; read it reactively so it fires
@@ -78,7 +75,7 @@ export default function CataloguePage() {
     router.replace("/products", { scroll: false });
   }, [wantsNew, router]);
 
-  const filters = useMemo(() => ({ search, kind, category, sort: "name" }), [search, kind, category]);
+  const filters = useMemo(() => ({ search, kind, sort: "name" }), [search, kind]);
   const { rows, total, loading, page, setPage, pageSize, setPageSize, reload } = useServerList<Row>("/catalogue", filters);
 
   async function confirmDelete() {
@@ -115,7 +112,7 @@ export default function CataloguePage() {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by name…"
+                placeholder="Search name, size or design…"
                 aria-label="Search products and materials"
                 className="h-10 w-full rounded-lg border border-border bg-surface pl-9 pr-3 text-sm text-ink shadow-xs outline-none placeholder:text-muted focus:border-primary"
               />
@@ -125,12 +122,6 @@ export default function CataloguePage() {
                 <option value="">All types</option>
                 <option value="item">Raw material</option>
                 <option value="product">Finished</option>
-              </Select>
-            </div>
-            <div className="min-w-0 flex-1 sm:w-36 sm:flex-none">
-              <Select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category">
-                <option value="">All categories</option>
-                {categories.map((c) => <option key={c} value={c}>{c}</option>)}
               </Select>
             </div>
             <Button onClick={() => setCreating(true)}>
@@ -154,7 +145,6 @@ export default function CataloguePage() {
                     <th className="w-14 num">S.No.</th>
                     <th>Name</th>
                     <th className="w-32">Type</th>
-                    <th>Category</th>
                     <th>Units</th>
                     <th>Colours / Variants</th>
                     <th className="num">In stock</th>
@@ -178,7 +168,6 @@ export default function CataloguePage() {
                             {KIND_LABEL[r.kind]}
                           </span>
                         </td>
-                        <td data-label="Category">{r.category || <span className="text-muted">—</span>}</td>
                         <td data-label="Units">{r.units.length > 0 ? r.units.join(", ") : <span className="text-muted">—</span>}</td>
                         <td data-label="Colours" className="max-w-[16rem] truncate">
                           {r.variants.length > 0 ? r.variants.join(", ") : <span className="text-muted">—</span>}
@@ -190,7 +179,9 @@ export default function CataloguePage() {
                         </td>
                         <td onClick={(e) => e.stopPropagation()}>
                           <div className="flex justify-end gap-1.5">
-                            <button onClick={() => setEditing(r)} className="inline-flex cursor-pointer items-center rounded-md bg-surface-2 px-2.5 text-xs font-medium text-ink transition-colors hover:bg-border-strong">Edit</button>
+                            {user?.role === "owner" && (
+                              <button onClick={() => setEditing(r)} className="inline-flex cursor-pointer items-center rounded-md bg-surface-2 px-2.5 text-xs font-medium text-ink transition-colors hover:bg-border-strong">Edit</button>
+                            )}
                             {user?.role === "owner" && (
                               <button onClick={() => setDeleting(r)} className="inline-flex cursor-pointer items-center rounded-md bg-surface-2 px-2.5 text-xs font-medium text-muted transition-colors hover:bg-[color:var(--danger)] hover:text-white">Delete</button>
                             )}

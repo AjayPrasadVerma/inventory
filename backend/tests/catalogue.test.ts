@@ -9,13 +9,14 @@
  */
 import { beforeAll, beforeEach, afterAll, describe, expect, it } from 'vitest';
 import { migrate, reset, pool, query } from './helpers/db.js';
-import { seedFixtures, finishedOnHand, type Fixtures } from './helpers/fixtures.js';
+import { seedFixtures, finishedOnHand, rawOnHand, type Fixtures } from './helpers/fixtures.js';
 import { assertCatalogueLines } from '../src/utils/catalogue.js';
 import {
   addCatalogueLines, convertCatalogueKind, editCatalogueFromSheet,
 } from '../src/modules/catalogue/catalogue.repo.js';
 import { karigarEntriesRepo } from '../src/modules/karigar-entries/karigar-entries.repo.js';
 import { productsRepo } from '../src/modules/products/products.repo.js';
+import { itemsRepo } from '../src/modules/items/items.repo.js';
 
 let f: Fixtures;
 /** A second item/product, so we have a variant that provably belongs elsewhere. */
@@ -233,9 +234,13 @@ describe('editing a product keeps size and design apart', () => {
     await productsRepo.update(id, { name: 'Legacy Box', variants: ['Small', 'Large'] });
     const rows = await variantRows(id);
     expect(rows.map((r) => r.variant).sort()).toEqual(['Large', 'Small']);
-    // A bare string carries no parts, and splitting the label to invent some
-    // would be guessing at data the caller never sent.
-    expect(rows.find((r) => r.variant === 'Large')).toMatchObject({ size: null, design: null });
+    // The label becomes the size. Leaving it null read as "no parts", which was
+    // tidier in theory and wrong in practice: identity is (product_id, size,
+    // design), so every bare label collapsed onto ('','') — two of them could not
+    // coexist, and one was a different bucket from "no variant" while the screen
+    // drew them as the same row. Migration 010 already made this same choice for
+    // every row that existed then.
+    expect(rows.find((r) => r.variant === 'Large')).toMatchObject({ size: 'Large', design: null });
   });
 });
 
@@ -529,5 +534,240 @@ describe('the convert guard covers movements, not just tables', () => {
     // the owner cannot find.
     await editCatalogueFromSheet({ kind: 'item', id, name: 'Ghost', lines: [] });
     expect((await query<{ name: string }>(`SELECT name FROM items WHERE id=$1`, [id])).rows[0]!.name).toBe('Ghost');
+  });
+});
+
+/** addCatalogueLines returns counts, not ids — the name is how it is found. */
+async function idOf(table: 'items' | 'products', name: string): Promise<number> {
+  const r = await query<{ id: number }>(
+    `SELECT id FROM ${table} WHERE lower(name) = lower($1)`, [name]);
+  return r.rows[0]!.id;
+}
+
+describe('the sheet is the whole picture', () => {
+  it('empties a bucket the owner deleted from the sheet', async () => {
+    await addCatalogueLines({
+      kind: 'item',
+      lines: [
+        { name: 'Sheet Drop', size: 'meter', design: 'Red', qty: 10 },
+        { name: 'Sheet Drop', size: 'meter', design: 'Blue', qty: 4 },
+      ],
+    });
+    const id = await idOf('items', 'Sheet Drop');
+    expect(await rawOnHand(id, 'meter')).toBe(14);
+
+    // Save the sheet back with only the Red line — Blue was removed on screen.
+    await editCatalogueFromSheet({
+      kind: 'item', id, name: 'Sheet Drop',
+      lines: [{ size: 'meter', design: 'Red', qty: 10 }],
+    });
+
+    // Red untouched, Blue brought to zero rather than silently left alone.
+    expect(await rawOnHand(id, 'meter')).toBe(10);
+    const blue = await query<{ q: string }>(
+      `SELECT COALESCE(SUM(sm.qty),0)::text AS q FROM stock_movements sm
+       JOIN item_variants iv ON iv.id = sm.variant_id
+       WHERE sm.item_id = $1 AND iv.color = 'Blue'`, [id]);
+    expect(Number(blue.rows[0]!.q)).toBe(0);
+  });
+
+  it('leaves a bucket alone when the sheet still lists it with a blank quantity', async () => {
+    await addCatalogueLines({
+      kind: 'item', lines: [{ name: 'Sheet Keep', size: 'meter', qty: 7 }],
+    });
+    const id = await idOf('items', 'Sheet Keep');
+    await editCatalogueFromSheet({
+      kind: 'item', id, name: 'Sheet Keep',
+      lines: [{ size: 'meter', design: null, qty: null }],
+    });
+    expect(await rawOnHand(id, 'meter')).toBe(7);
+  });
+});
+
+describe('type change is all-or-nothing', () => {
+  it('rolls the move back when the rename that rides with it collides', async () => {
+    // A product already answers to this name — the usual reason to change a type.
+    await addCatalogueLines({ kind: 'product', lines: [{ name: 'Clash Box', size: '2x3', qty: 1 }] });
+    await addCatalogueLines({
+      kind: 'item', lines: [{ name: 'Clash Raw', size: 'meter', qty: 5 }],
+    });
+    const rawId = await idOf('items', 'Clash Raw');
+
+    await expect(convertCatalogueKind({
+      from: 'item', id: rawId,
+      sheet: { name: 'Clash Box', lines: [{ size: 'meter', design: null, qty: 5 }] },
+    })).rejects.toThrow();
+
+    // The raw record and its stock must still be exactly where they were.
+    const still = await query(`SELECT 1 FROM items WHERE id = $1`, [rawId]);
+    expect(still.rowCount).toBe(1);
+    expect(await rawOnHand(rawId, 'meter')).toBe(5);
+    // And no orphan was left on the far side.
+    const orphans = await query(
+      `SELECT 1 FROM products WHERE lower(name) = 'clash raw'`);
+    expect(orphans.rowCount).toBe(0);
+  });
+
+  it('moves the record and its stock when the sheet rides along cleanly', async () => {
+    await addCatalogueLines({
+      kind: 'item', lines: [{ name: 'Move Me', size: '2x3', design: 'Gold', qty: 12 }],
+    });
+    const rawId = await idOf('items', 'Move Me');
+
+    const moved = await convertCatalogueKind({
+      from: 'item', id: rawId,
+      sheet: { name: 'Move Me', lines: [{ size: '2x3', design: 'Gold', qty: 12 }] },
+    });
+    expect(moved.kind).toBe('product');
+
+    expect(await finishedOnHand(moved.id)).toBe(12);
+    const gone = await query(`SELECT 1 FROM items WHERE id = $1`, [rawId]);
+    expect(gone.rowCount).toBe(0);
+    const leftover = await query(`SELECT 1 FROM stock_movements WHERE item_id = $1`, [rawId]);
+    expect(leftover.rowCount).toBe(0);
+  });
+});
+
+describe('what the QA pass found', () => {
+  it('keeps a size-less finished bucket when its quantity is left blank', async () => {
+    // The shop's commonest shape: a name and a count, no size, no design.
+    await addCatalogueLines({ kind: 'product', lines: [{ name: 'Bare Box', qty: 9 }] });
+    const id = await idOf('products', 'Bare Box');
+    expect(await finishedOnHand(id)).toBe(9);
+
+    // The sheet still lists the row; only its quantity was cleared.
+    await editCatalogueFromSheet({
+      kind: 'product', id, name: 'Bare Box',
+      lines: [{ size: null, design: null, qty: null }],
+    });
+    expect(await finishedOnHand(id)).toBe(9);
+  });
+
+  it('refuses two sheet lines for one bucket instead of letting the second win', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Dup Line', size: 'A', qty: 5 }] });
+    const id = await idOf('items', 'Dup Line');
+
+    await expect(editCatalogueFromSheet({
+      kind: 'item', id, name: 'Dup Line',
+      lines: [{ size: 'A', design: null, qty: 5 }, { size: 'A', design: null, qty: 3 }],
+    })).rejects.toThrow(/two lines/i);
+
+    // Nothing was written on the way to the refusal.
+    expect(await rawOnHand(id, 'A')).toBe(5);
+  });
+
+  it('refuses a type change whose lines would collapse onto one bucket', async () => {
+    // A blank size and a literal "pcs" size are two buckets as a product and one
+    // as a raw material, so the second line would have overwritten the first.
+    await addCatalogueLines({
+      kind: 'product',
+      lines: [
+        { name: 'Collapse', size: null, design: 'Red', qty: 10 },
+        { name: 'Collapse', size: 'pcs', design: 'Red', qty: 4 },
+      ],
+    });
+    const id = await idOf('products', 'Collapse');
+    expect(await finishedOnHand(id)).toBe(14);
+
+    await expect(convertCatalogueKind({
+      from: 'product', id,
+      sheet: {
+        name: 'Collapse',
+        lines: [
+          { size: null, design: 'Red', qty: 10 },
+          { size: 'pcs', design: 'Red', qty: 4 },
+        ],
+      },
+    })).rejects.toThrow(/same line/i);
+
+    // Still a product, still holding all fourteen.
+    expect(await finishedOnHand(id)).toBe(14);
+  });
+
+  it('revives a hidden name instead of making a second row', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Revive Me', size: 'meter', qty: 3 }] });
+    const id = await idOf('items', 'Revive Me');
+    // Empty it first — a record still holding stock cannot be removed.
+    await editCatalogueFromSheet({
+      kind: 'item', id, name: 'Revive Me', lines: [{ size: 'meter', design: null, qty: 0 }],
+    });
+    expect(await itemsRepo.softDelete(id)).toBe(true);
+
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'revive me', size: 'meter', qty: 8 }] });
+    const rows = await query(`SELECT id FROM items WHERE lower(name) = 'revive me'`);
+    expect(rows.rowCount).toBe(1);
+    expect(rows.rows[0]!.id).toBe(id);
+    expect(await rawOnHand(id, 'meter')).toBe(8);
+  });
+
+  it('refuses to hide a record that still holds stock', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Still Held', size: 'meter', qty: 6 }] });
+    const id = await idOf('items', 'Still Held');
+    await expect(itemsRepo.softDelete(id)).rejects.toThrow(/still holding/i);
+    const row = await query<{ is_active: boolean }>(`SELECT is_active FROM items WHERE id = $1`, [id]);
+    expect(row.rows[0]!.is_active).toBe(true);
+  });
+
+  it('keeps two bare-label variants apart', async () => {
+    // Both used to carry size NULL, so they shared one identity and 011's merge
+    // would have folded them together.
+    const p = await productsRepo.create({ name: 'Two Labels', variants: ['Small', 'Large'] } as never);
+    const vs = await query<{ variant: string; size: string | null }>(
+      `SELECT variant, size FROM product_variants WHERE product_id = $1 ORDER BY variant`, [p!.id]);
+    expect(vs.rowCount).toBe(2);
+    expect(vs.rows.map((r) => r.size)).toEqual(['Large', 'Small']);
+  });
+});
+
+describe('one spelling per thing', () => {
+  it('treats doubled and non-breaking spaces in a name as the same name', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Ring Box', size: 'meter', qty: 5 }] });
+    // A pasted name often arrives with a non-breaking space; a typed one with two.
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Ring  Box', size: 'meter', qty: 2 }] });
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Ring Box', size: 'meter', qty: 1 }] });
+
+    const rows = await query<{ id: number; name: string }>(
+      `SELECT id, name FROM items WHERE lower(name) LIKE 'ring%box'`);
+    expect(rows.rowCount).toBe(1);
+    // Stored normalised, so what the owner sees is one clean spelling.
+    expect(rows.rows[0]!.name).toBe('Ring Box');
+    expect(await rawOnHand(rows.rows[0]!.id, 'meter')).toBe(8);
+  });
+
+  it('keeps one bucket when a unit or colour is typed in another case', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Case Velvet', size: 'meter', design: 'Red', qty: 10 }] });
+    const id = await idOf('items', 'Case Velvet');
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'Case Velvet', size: 'METER', design: 'red', qty: 5 }] });
+
+    const units = await query(`SELECT 1 FROM item_units WHERE item_id = $1`, [id]);
+    const colours = await query(`SELECT 1 FROM item_variants WHERE item_id = $1`, [id]);
+    expect(units.rowCount).toBe(1);
+    expect(colours.rowCount).toBe(1);
+    // One bucket holding both, under the spelling recorded first.
+    expect(await rawOnHand(id, 'meter')).toBe(15);
+  });
+
+  it('keeps one finished variant when size or design is typed in another case', async () => {
+    await addCatalogueLines({ kind: 'product', lines: [{ name: 'Case Box', size: '2x3', design: 'Floral', qty: 4 }] });
+    const id = await idOf('products', 'Case Box');
+    await addCatalogueLines({ kind: 'product', lines: [{ name: 'Case Box', size: '2X3', design: 'FLORAL', qty: 6 }] });
+
+    const vs = await query<{ variant: string }>(
+      `SELECT variant FROM product_variants WHERE product_id = $1`, [id]);
+    expect(vs.rowCount).toBe(1);
+    expect(vs.rows[0]!.variant).toBe('2x3 · Floral');
+    expect(await finishedOnHand(id)).toBe(10);
+  });
+
+  it('does not invent a unit for a blank line setting a bucket to 0', async () => {
+    await addCatalogueLines({ kind: 'item', lines: [{ name: 'No Phantom', size: 'sheet', qty: 1 }] });
+    const id = await idOf('items', 'No Phantom');
+    await editCatalogueFromSheet({
+      kind: 'item', id, name: 'No Phantom',
+      lines: [{ size: 'sheet', design: null, qty: 1 }, { size: null, design: null, qty: 0 }],
+    });
+    const units = await query<{ unit: string }>(
+      `SELECT unit FROM item_units WHERE item_id = $1`, [id]);
+    expect(units.rows.map((u) => u.unit)).toEqual(['sheet']);
   });
 });

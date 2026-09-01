@@ -18,27 +18,64 @@ import type { PoolClient } from 'pg';
 
 export type CatalogueKind = 'item' | 'product';
 
+/**
+ * One spelling for one thing.
+ *
+ * Matching on lower(name) alone let "Ring  Box" and "Ring Box" become two
+ * records that read identically on screen, and a non-breaking space — which
+ * arrives whenever a name is pasted from a document or a chat — made a third.
+ * Every run of whitespace, of any kind, collapses to a single ordinary space.
+ *
+ * Applied on the way in, so what is stored is already normalised and a plain
+ * lower(name) comparison is then enough on the SQL side.
+ */
+export function normaliseName(raw: string): string {
+  return raw.replace(/\s+/gu, ' ').trim();
+}
+
+/** The same, for a size or a design: they are matched without regard to case. */
+export function normalisePart(raw: string | null | undefined): string {
+  return (raw ?? '').replace(/\s+/gu, ' ').trim();
+}
+
 export interface TypedLine {
   name: string;
   size?: string | null;
   design?: string | null;
 }
 
-/** Case-insensitive find, else insert. Returns the catalogue row's id. */
+/**
+ * Case-insensitive find, else revive, else insert.
+ *
+ * Removing a record only hides it, so a name that was removed and later typed
+ * again used to make a second row: the catalogue showed one and the stock
+ * reports — which do not filter on is_active — counted both. Bringing the hidden
+ * row back keeps one row per name instead of accumulating namesakes.
+ */
 export async function findOrCreateCatalogue(
   client: PoolClient,
   kind: CatalogueKind,
   name: string,
 ): Promise<number> {
   const table = kind === 'item' ? 'items' : 'products';
-  const found = await client.query<{ id: number }>(
-    `SELECT id FROM ${table} WHERE lower(name) = lower($1) AND is_active LIMIT 1`,
-    [name],
+  const clean = normaliseName(name);
+  // Active first: if both exist, the visible one is the one being referred to.
+  const found = await client.query<{ id: number; is_active: boolean }>(
+    `SELECT id, is_active FROM ${table}
+     WHERE lower(regexp_replace(name, '[[:space:]]+', ' ', 'g')) = lower($1)
+     ORDER BY is_active DESC, id LIMIT 1`,
+    [clean],
   );
-  if (found.rows[0]) return found.rows[0].id;
+  const hit = found.rows[0];
+  if (hit?.is_active) return hit.id;
+  if (hit) {
+    await client.query(
+      `UPDATE ${table} SET is_active = TRUE, updated_at = now() WHERE id = $1`, [hit.id]);
+    return hit.id;
+  }
   const made = await client.query<{ id: number }>(
     `INSERT INTO ${table} (name) VALUES ($1) RETURNING id`,
-    [name],
+    [clean],
   );
   return made.rows[0]!.id;
 }
@@ -71,25 +108,44 @@ export async function resolveRawParts(
   itemId: number,
   line: Omit<TypedLine, 'name'>,
 ): Promise<{ unit: string; variantId: number | null }> {
-  const unit = (line.size ?? '').trim() || 'pcs';
-
-  await client.query(
-    `INSERT INTO item_units (item_id, unit) VALUES ($1,$2) ON CONFLICT (item_id, unit) DO NOTHING`,
-    [itemId, unit],
+  const typed = normalisePart(line.size) || 'pcs';
+  // Case is not part of what a unit or a colour IS. Matching it exactly split one
+  // bucket into several — "meter", "Meter" and "METER" each held their own
+  // stock — and the sheet's own dropdowns made it easy, offering every spelling
+  // the shop had ever used. The first spelling recorded is the one kept.
+  const known = await client.query<{ unit: string }>(
+    `SELECT unit FROM item_units WHERE item_id = $1 AND lower(unit) = lower($2) LIMIT 1`,
+    [itemId, typed],
   );
+  const unit = known.rows[0]?.unit ?? typed;
+  if (!known.rowCount) {
+    await client.query(
+      `INSERT INTO item_units (item_id, unit) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+      [itemId, unit],
+    );
+  }
 
-  const design = (line.design ?? '').trim();
+  const design = normalisePart(line.design);
   if (!design) return { unit, variantId: null };
 
-  await client.query(
-    `INSERT INTO item_variants (item_id, color) VALUES ($1,$2) ON CONFLICT (item_id, color) DO NOTHING`,
-    [itemId, design],
-  );
   const v = await client.query<{ id: number }>(
-    `SELECT id FROM item_variants WHERE item_id = $1 AND color = $2`,
+    `SELECT id FROM item_variants WHERE item_id = $1 AND lower(color) = lower($2) LIMIT 1`,
     [itemId, design],
   );
-  return { unit, variantId: v.rows[0]?.id ?? null };
+  if (v.rows[0]) return { unit, variantId: v.rows[0].id };
+
+  const made = await client.query<{ id: number }>(
+    `INSERT INTO item_variants (item_id, color) VALUES ($1,$2)
+     ON CONFLICT DO NOTHING RETURNING id`,
+    [itemId, design],
+  );
+  if (made.rows[0]) return { unit, variantId: made.rows[0].id };
+  // Lost a race: the row now exists under someone else's spelling.
+  const again = await client.query<{ id: number }>(
+    `SELECT id FROM item_variants WHERE item_id = $1 AND lower(color) = lower($2) LIMIT 1`,
+    [itemId, design],
+  );
+  return { unit, variantId: again.rows[0]?.id ?? null };
 }
 
 /**
@@ -112,29 +168,44 @@ export async function resolveFinishedParts(
   productId: number,
   line: Omit<TypedLine, 'name'>,
 ): Promise<{ variantId: number | null }> {
-  const size = (line.size ?? '').trim();
-  const design = (line.design ?? '').trim();
+  const size = normalisePart(line.size);
+  const design = normalisePart(line.design);
   if (!size && !design) return { variantId: null };
 
   const label = [size, design].filter(Boolean).join(' · ');
+  // Case-insensitive for the same reason as a unit or a colour — see
+  // resolveRawParts. The spelling already on record wins.
   const existing = await client.query<{ id: number }>(
     `SELECT id FROM product_variants
      WHERE product_id = $1
-       AND COALESCE(size,'') = $2
-       AND COALESCE(design,'') = $3
+       AND lower(COALESCE(size,'')) = lower($2)
+       AND lower(COALESCE(design,'')) = lower($3)
      LIMIT 1`,
     [productId, size, design],
   );
   if (existing.rows[0]) return { variantId: existing.rows[0].id };
 
+  // The conflict target has to name the index exactly, and 012 folded case into
+  // it. DO NOTHING plus a re-read rather than a target expression: it survives
+  // the next change to the key, and losing the race is the only way to get here.
   const made = await client.query<{ id: number }>(
     `INSERT INTO product_variants (product_id, variant, size, design)
      VALUES ($1,$2,$3,$4)
-     ON CONFLICT (product_id, variant) DO UPDATE SET size = EXCLUDED.size, design = EXCLUDED.design
+     ON CONFLICT DO NOTHING
      RETURNING id`,
     [productId, label, size || null, design || null],
   );
-  return { variantId: made.rows[0]!.id };
+  if (made.rows[0]) return { variantId: made.rows[0].id };
+
+  const again = await client.query<{ id: number }>(
+    `SELECT id FROM product_variants
+     WHERE product_id = $1
+       AND lower(COALESCE(size,'')) = lower($2)
+       AND lower(COALESCE(design,'')) = lower($3)
+     LIMIT 1`,
+    [productId, size, design],
+  );
+  return { variantId: again.rows[0]?.id ?? null };
 }
 
 /**
