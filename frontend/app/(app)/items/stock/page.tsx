@@ -4,16 +4,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { cachedGet } from "@/lib/cache";
-import { formatDate, qty as fmtQty, todayISO } from "@/lib/utils";
+import { formatDate, qty as fmtQty } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input, Select, Label } from "@/components/ui/field";
 import { Combobox, type ComboOption } from "@/components/ui/combobox";
-import { DateField } from "@/components/ui/date-field";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { Badge, Card, EmptyState, Spinner } from "@/components/ui/misc";
 import { PageHeader } from "@/components/page-parts";
 
 interface ItemLite { id: number; name: string }
-type Reason = "purchase" | "adjustment" | "job_issue" | "job_return";
+type Reason = "purchase" | "adjustment" | "karigar_out" | "karigar_in" | "job_issue" | "job_return";
 interface StockEntry { date: string; reason: Reason; party: string | null; variant: string | null; unit: string; qty: number; note: string | null }
 interface StockData {
   onHand: { variant: string | null; unit: string; qty: number }[];
@@ -36,10 +36,11 @@ export default function MaterialStockPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // filters — default to the current month (1st → today)
-  const [from, setFrom] = useState(() => todayISO().slice(0, 8) + "01");
-  const [to, setTo] = useState(() => todayISO());
-  const [type, setType] = useState<"all" | "purchase" | "job_issue" | "job_return" | "adjustment">("all");
+  // Opens on everything. A history page that defaults to this month greets the
+  // owner with "no movements match" for anything bought before the 1st.
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [type, setType] = useState<"all" | "purchase" | "karigar_out" | "karigar_in" | "adjustment">("all");
   const [search, setSearch] = useState("");
 
   // Load the material list once and honour a ?i=<id> pre-selection (set inside the
@@ -90,6 +91,8 @@ export default function MaterialStockPage() {
   function clearFilters() { setFrom(""); setTo(""); setType("all"); setSearch(""); }
 
   const reasonBadge: Record<Reason, { label: string; tone: "success" | "warning" | "accent" | "neutral" }> = {
+    karigar_out: { label: "Issued", tone: "warning" },
+    karigar_in: { label: "Returned", tone: "success" },
     purchase: { label: "Purchase", tone: "success" },
     job_issue: { label: "Issued", tone: "warning" },
     job_return: { label: "Returned", tone: "accent" },
@@ -107,22 +110,18 @@ export default function MaterialStockPage() {
             <Label>Material</Label>
             <Combobox options={itemOptions} value={itemId} onChange={setItemId} placeholder="Search material…" ariaLabel="Material" />
           </div>
-          <div className="w-36">
-            <Label>From</Label>
-            <DateField value={from} onChange={setFrom} disabled={!itemId} ariaLabel="From date" />
-          </div>
-          <div className="w-36">
-            <Label>To</Label>
-            <DateField value={to} onChange={setTo} min={from || undefined} disabled={!itemId} ariaLabel="To date" />
+          <div className="w-full sm:w-[19rem]">
+            <Label>Date range</Label>
+            <DateRangePicker from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} disabled={!itemId} />
           </div>
           <div className="w-44">
             <Label>Type</Label>
             <Select value={type} onChange={(e) => setType(e.target.value as typeof type)} disabled={!itemId}>
               <option value="all">All movements</option>
-              <option value="purchase">Purchases (in)</option>
-              <option value="job_issue">Issued to karigar</option>
-              <option value="job_return">Returns</option>
-              <option value="adjustment">Opening / adjustments</option>
+              <option value="purchase">Purchased in</option>
+              <option value="karigar_out">Issued to karigar</option>
+              <option value="karigar_in">Returned by karigar</option>
+              <option value="adjustment">Opening / corrections</option>
             </Select>
           </div>
           <div className="min-w-[10rem] flex-1">
@@ -141,15 +140,33 @@ export default function MaterialStockPage() {
         <div className="py-16 text-center"><Spinner className="h-6 w-6 text-primary" /></div>
       ) : stock ? (
         <section className="mt-4">
-          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1.5">
-            <h2 className="text-sm font-semibold text-ink">Stock movements</h2>
-            <span className="flex flex-wrap items-center gap-1.5 text-sm">
-              <span className="text-muted">On hand:</span>
-              {stock.onHand.length > 0
-                ? stock.onHand.map((o, i) => (
-                    <Badge key={i} tone={o.qty > 0 ? "success" : "neutral"}>{`${o.variant ? o.variant + " · " : ""}${fmtQty(o.qty)} ${o.unit}`}</Badge>
-                  ))
-                : <span className="text-muted">nothing on hand</span>}
+          <Card className="mb-3 p-3">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">On hand</p>
+            {stock.onHand.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {stock.onHand.map((o, i) => (
+                  <span
+                    key={i}
+                    className={`rounded-lg px-3 py-1.5 text-sm font-semibold tabular-nums ${
+                      o.qty > 0
+                        ? "bg-[color:var(--success-tint)] text-[color:var(--success)]"
+                        : "bg-[color:var(--danger-tint)] text-[color:var(--danger)]"
+                    }`}
+                  >
+                    {fmtQty(o.qty)} {o.unit}
+                    {o.variant && <span className="ml-1.5 font-normal opacity-75">{o.variant}</span>}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted">Nothing on hand.</p>
+            )}
+          </Card>
+
+          <div className="mb-2 flex items-baseline justify-between gap-3">
+            <h2 className="text-sm font-semibold text-ink">Movements</h2>
+            <span className="text-xs text-muted tabular-nums">
+              {shown.length < stock.entries.length ? `${shown.length} of ${stock.entries.length}` : shown.length}
             </span>
           </div>
           <div className="overflow-hidden rounded-xl border border-border">
@@ -157,21 +174,21 @@ export default function MaterialStockPage() {
               <table className="data-table stacked sticky-head sm:min-w-[820px]">
                 <thead>
                   <tr>
-                    <th>Date</th><th>Type</th><th>From / To</th><th>Colour</th><th>Unit</th>
+                    <th>Date</th><th>Type</th><th>From / To</th><th>Size</th><th>Design</th>
                     <th className="num">In</th><th className="num">Out</th>
                   </tr>
                 </thead>
                 <tbody>
                   {shown.map((e, i) => {
-                    const b = reasonBadge[e.reason];
+                    const b = reasonBadge[e.reason] ?? { label: e.reason, tone: "neutral" as const };
                     const label = e.reason === "adjustment" && e.note === "Opening stock" ? "Opening stock" : b.label;
                     return (
                       <tr key={i}>
                         <td data-label="Date" className="whitespace-nowrap text-muted">{formatDate(e.date)}</td>
                         <td data-label="Type"><Badge tone={b.tone}>{label}</Badge></td>
                         <td data-label="From / To" className="text-ink">{e.party || "—"}</td>
-                        <td data-label="Colour" className="text-muted">{e.variant || "—"}</td>
-                        <td data-label="Unit" className="text-muted">{e.unit}</td>
+                        <td data-label="Size" className="text-muted">{e.unit}</td>
+                        <td data-label="Design" className="text-muted">{e.variant || "—"}</td>
                         <td data-label="In" className="num">{e.qty > 0 ? fmtQty(e.qty) : "—"}</td>
                         <td data-label="Out" className="num">{e.qty < 0 ? fmtQty(-e.qty) : "—"}</td>
                       </tr>
@@ -184,7 +201,6 @@ export default function MaterialStockPage() {
               </table>
             </div>
           </div>
-          <p className="mt-1.5 text-xs text-muted">{shown.length} of {stock.entries.length} movements shown</p>
         </section>
       ) : null}
     </div>
