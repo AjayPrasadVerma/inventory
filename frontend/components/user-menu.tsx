@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { cn, roleLabel } from "@/lib/utils";
 import { Icon } from "./icons";
@@ -24,6 +25,7 @@ function useDarkClass(): boolean {
 
 export function UserMenu({ name, role, onLogout }: { name?: string; role?: string; onLogout: () => void }) {
   const [open, setOpen] = useState(false);
+  const router = useRouter();
   const dark = useDarkClass();
   const ref = useRef<HTMLDivElement>(null);
   const initials = (name ?? "?").split(" ").map((s) => s[0]).slice(0, 2).join("").toUpperCase();
@@ -82,6 +84,20 @@ export function UserMenu({ name, role, onLogout }: { name?: string; role?: strin
           </div>
 
           <div className="my-1 h-px bg-border" />
+
+          {/* Managing logins is a settings job, not a daily one, so it sits here
+              rather than in the inventory menu. Owner-only, matching the routes
+              the page calls. */}
+          {role === "owner" && (
+            <MenuItem
+              icon={<Icon.Users />}
+              label="Users"
+              onClick={() => {
+                setOpen(false);
+                router.push("/users");
+              }}
+            />
+          )}
 
           <MenuItem
             icon={dark ? <Icon.Sun /> : <Icon.Moon />}
