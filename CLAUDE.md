@@ -36,14 +36,21 @@ cd frontend && npx tsc --noEmit && npx eslint . && npm run build
 - If you change a payload shape, grep for *every* route that accepts it. A create schema was once updated while the matching PATCH was not, and editing became impossible for the new shape.
 - If a UI change can't be verified because the browser isn't signed in, say so and ask the user to check — don't call it done.
 
-## 4. The database is live and shared
+## 4. The databases
 
-`backend/.env`'s `DATABASE_URL` points at the **production** Postgres (18.4, on the VPS at `147.93.19.105`). Dev and prod share it. There is no local Postgres and no Docker on this machine.
+All three live on the same Postgres (18.4, on the VPS at `147.93.19.105`). There is no local Postgres and no Docker on this machine.
 
-- **Never run destructive SQL against it.** For any write while investigating, use `BEGIN … ROLLBACK` and verify the rollback.
-- The tests truncate tables, so they refuse to run unless `TEST_DATABASE_URL` is set, differs from `DATABASE_URL`, and names a database containing `test` (`inventory_test` exists on the VPS for this). See `backend/tests/helpers/db.ts`.
+| Database | What it is |
+|---|---|
+| `inventory` | **production** — what https://inventory.acronix.in serves. Do not point local work at it. |
+| `inventory_dev` | where local development runs. `backend/.env`'s `DATABASE_URL` points here. |
+| `inventory_test` | the test harness only. Truncated constantly. |
+
+- **Never run destructive SQL against `inventory`.** For any write while investigating, use `BEGIN … ROLLBACK` and verify the rollback.
+- `inventory_dev` has one login seeded — **Dev Owner / 9999999999**. Without it nobody can sign in locally, since the app has no way to create the first user from outside.
+- The tests truncate tables, so they refuse to run unless `TEST_DATABASE_URL` is set, differs from `DATABASE_URL`, and names a database containing `test`. See `backend/tests/helpers/db.ts`. `.env` is gitignored, so a fresh clone has to set both.
 - **Don't try to run the suite against the VPS as a habit** — every query is a ~2s round trip and sockets drop mid-run, so it fails on infrastructure rather than logic. CI runs a `postgres:18-alpine` service on the runner; that is where the suite is meant to run.
-- Migrations are forward-only files in `backend/src/db/migrations/`, applied with `npm run migrate`. Say explicitly when a migration has been applied to the shared database.
+- Migrations are forward-only files in `backend/src/db/migrations/`, applied with `npm run migrate`. The deploy pipeline does **not** run them, so a migration reaches production only when someone applies it by hand. Say explicitly which database you have applied one to.
 
 ## 5. Ports — check before starting anything
 
