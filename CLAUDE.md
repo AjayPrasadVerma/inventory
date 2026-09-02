@@ -47,7 +47,7 @@ All three live on the same Postgres (18.4, on the VPS at `147.93.19.105`). There
 | `inventory_test` | the test harness only. Truncated constantly. |
 
 - **Never run destructive SQL against `inventory`.** For any write while investigating, use `BEGIN … ROLLBACK` and verify the rollback.
-- `inventory_dev` has one login seeded — **Dev Owner / 9999999999**. Without it nobody can sign in locally, since the app has no way to create the first user from outside.
+- `inventory_dev` has one login seeded — **Dev Owner / 9999999999**. It needs one: the app only adds users when an owner is already signed in. `npm run seed` is what creates that first owner, from the `SEED_OWNER_*` keys in `.env`; it is idempotent and refuses a password under 8 characters.
 - The tests truncate tables, so they refuse to run unless `TEST_DATABASE_URL` is set, differs from `DATABASE_URL`, and names a database containing `test`. See `backend/tests/helpers/db.ts`. `.env` is gitignored, so a fresh clone has to set both.
 - **Don't try to run the suite against the VPS as a habit** — every query is a ~2s round trip and sockets drop mid-run, so it fails on infrastructure rather than logic. CI runs a `postgres:18-alpine` service on the runner; that is where the suite is meant to run.
 - Migrations are forward-only files in `backend/src/db/migrations/`, applied with `npm run migrate`. The deploy pipeline does **not** run them, so a migration reaches production only when someone applies it by hand. Say explicitly which database you have applied one to.
@@ -104,5 +104,6 @@ Don't extend, refactor or "tidy" them, and don't count them when asked to clean 
 
 ## Reference
 
+- Mobile app (Flutter, Android first): [MOBILE.md](MOBILE.md) — decisions, the API work it needs first, and how to set up on the Windows machine. Nothing is built yet.
 - Deployment: [DEPLOY.md](DEPLOY.md)
 - Frontend framework caveats: [frontend/AGENTS.md](frontend/AGENTS.md) — this Next.js differs from training data; read `node_modules/next/dist/docs/` first.
