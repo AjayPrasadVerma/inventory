@@ -76,6 +76,21 @@ export const Icon = {
       <path d="M14 8h4M16 6v4" />
     </Svg>
   ),
+  Users: (p: SVGProps<SVGSVGElement>) => (
+    <Svg {...p}>
+      <circle cx="9" cy="8" r="3.5" />
+      <path d="M2.5 20a6.5 6.5 0 0 1 13 0" />
+      <path d="M16.5 5.2a3.5 3.5 0 0 1 0 6.6" />
+      <path d="M18 14.4a6.5 6.5 0 0 1 3.5 5.6" />
+    </Svg>
+  ),
+  Key: (p: SVGProps<SVGSVGElement>) => (
+    <Svg {...p}>
+      <circle cx="8" cy="15" r="4" />
+      <path d="M10.9 12.1 20 3" />
+      <path d="M17 6l2.5 2.5" />
+    </Svg>
+  ),
   Customer: (p: SVGProps<SVGSVGElement>) => (
     <Svg {...p}>
       <circle cx="9" cy="8" r="3.5" />
