@@ -4,16 +4,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { cachedGet } from "@/lib/cache";
-import { formatDate, qty as fmtQty, todayISO } from "@/lib/utils";
+import { formatDate, qty as fmtQty } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input, Select, Label } from "@/components/ui/field";
 import { Combobox, type ComboOption } from "@/components/ui/combobox";
-import { DateField } from "@/components/ui/date-field";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { Badge, Card, EmptyState, Spinner } from "@/components/ui/misc";
 import { PageHeader } from "@/components/page-parts";
 
 interface ProductLite { id: number; name: string }
-type Reason = "job_receipt" | "sale" | "adjustment";
+type Reason = "karigar_in" | "karigar_out" | "purchase" | "job_receipt" | "sale" | "adjustment";
 interface StockEntry { date: string; reason: Reason; party: string | null; variant: string | null; qty: number; note: string | null }
 interface StockData {
   onHand: { variant: string | null; qty: number }[];
@@ -37,9 +37,10 @@ export default function ProductStockPage() {
   const [error, setError] = useState<string | null>(null);
 
   // filters — default to the current month (1st → today)
-  const [from, setFrom] = useState(() => todayISO().slice(0, 8) + "01");
-  const [to, setTo] = useState(() => todayISO());
-  const [type, setType] = useState<"all" | "job_receipt" | "sale" | "adjustment">("all");
+  // Opens on everything — see the material page for why a month default was wrong.
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [type, setType] = useState<"all" | "karigar_in" | "purchase" | "sale" | "adjustment">("all");
   const [search, setSearch] = useState("");
 
   // Load the product list once and honour a ?p=<id> pre-selection (set inside the
@@ -90,6 +91,9 @@ export default function ProductStockPage() {
   function clearFilters() { setFrom(""); setTo(""); setType("all"); setSearch(""); }
 
   const reasonBadge: Record<Reason, { label: string; tone: "success" | "warning" | "accent" | "neutral" }> = {
+    karigar_in: { label: "Received", tone: "success" },
+    karigar_out: { label: "Sent back", tone: "warning" },
+    purchase: { label: "Purchased", tone: "accent" },
     job_receipt: { label: "Made", tone: "success" },
     sale: { label: "Sold", tone: "warning" },
     adjustment: { label: "Adjustment", tone: "neutral" },
@@ -106,21 +110,18 @@ export default function ProductStockPage() {
             <Label>Product</Label>
             <Combobox options={productOptions} value={productId} onChange={setProductId} placeholder="Search product…" ariaLabel="Product" />
           </div>
-          <div className="w-36">
-            <Label>From</Label>
-            <DateField value={from} onChange={setFrom} disabled={!productId} ariaLabel="From date" />
-          </div>
-          <div className="w-36">
-            <Label>To</Label>
-            <DateField value={to} onChange={setTo} min={from || undefined} disabled={!productId} ariaLabel="To date" />
+          <div className="w-full sm:w-[19rem]">
+            <Label>Date range</Label>
+            <DateRangePicker from={from} to={to} onChange={(f, t) => { setFrom(f); setTo(t); }} disabled={!productId} />
           </div>
           <div className="w-44">
             <Label>Type</Label>
             <Select value={type} onChange={(e) => setType(e.target.value as typeof type)} disabled={!productId}>
               <option value="all">All movements</option>
-              <option value="job_receipt">Made (in)</option>
-              <option value="sale">Sold (out)</option>
-              <option value="adjustment">Opening / adjustments</option>
+              <option value="karigar_in">Received from karigar</option>
+              <option value="purchase">Purchased in</option>
+              <option value="sale">Sold out</option>
+              <option value="adjustment">Opening / corrections</option>
             </Select>
           </div>
           <div className="min-w-[10rem] flex-1">
@@ -155,20 +156,20 @@ export default function ProductStockPage() {
               <table className="data-table stacked sticky-head sm:min-w-[720px]">
                 <thead>
                   <tr>
-                    <th>Date</th><th>Type</th><th>From / To</th><th>Variant</th>
+                    <th>Date</th><th>Type</th><th>From / To</th><th>Size · Design</th>
                     <th className="num">In</th><th className="num">Out</th>
                   </tr>
                 </thead>
                 <tbody>
                   {shown.map((e, i) => {
-                    const b = reasonBadge[e.reason];
+                    const b = reasonBadge[e.reason] ?? { label: e.reason, tone: "neutral" as const };
                     const label = e.reason === "adjustment" && e.note === "Opening stock" ? "Opening stock" : b.label;
                     return (
                       <tr key={i}>
                         <td data-label="Date" className="whitespace-nowrap text-muted">{formatDate(e.date)}</td>
                         <td data-label="Type"><Badge tone={b.tone}>{label}</Badge></td>
                         <td data-label="From / To" className="text-ink">{e.party || "—"}</td>
-                        <td data-label="Variant" className="text-muted">{e.variant || "—"}</td>
+                        <td data-label="Size · Design" className="text-muted">{e.variant || "—"}</td>
                         <td data-label="In" className="num">{e.qty > 0 ? fmtQty(e.qty) : "—"}</td>
                         <td data-label="Out" className="num">{e.qty < 0 ? fmtQty(-e.qty) : "—"}</td>
                       </tr>
