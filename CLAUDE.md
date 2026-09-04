@@ -38,17 +38,20 @@ cd frontend && npx tsc --noEmit && npx eslint . && npm run build
 
 ## 4. The databases
 
-All three live on the same Postgres (18.4, on the VPS at `147.93.19.105`). There is no local Postgres and no Docker on this machine.
+Both live on the same Postgres (18.4, on the VPS at `147.93.19.105`). There is no local Postgres and no Docker on either machine.
 
 | Database | What it is |
 |---|---|
-| `inventory` | **production** — what https://inventory.acronix.in serves. Do not point local work at it. |
-| `inventory_dev` | where local development runs. `backend/.env`'s `DATABASE_URL` points here. |
-| `inventory_test` | the test harness only. Truncated constantly. |
+| `inventory` | **production** — what https://inventory.acronix.in serves. Never point local work at it. |
+| `inventory_dev` | everything else: local development **and** the test suite. `backend/.env`'s `DATABASE_URL` points here. |
+
+There is deliberately no separate test database any more. Keeping one in step across two machines cost more than it saved, and a second connection string in every `.env` was a setup step people got wrong. CI still uses its own throwaway Postgres, via `TEST_DATABASE_URL` — which stays supported, just optional.
 
 - **Never run destructive SQL against `inventory`.** For any write while investigating, use `BEGIN … ROLLBACK` and verify the rollback.
 - `inventory_dev` has one login seeded — **Dev Owner / 9999999999**. It needs one: the app only adds users when an owner is already signed in. `npm run seed` is what creates that first owner, from the `SEED_OWNER_*` keys in `.env`; it is idempotent and refuses a password under 8 characters.
-- The tests truncate tables, so they refuse to run unless `TEST_DATABASE_URL` is set, differs from `DATABASE_URL`, and names a database containing `test`. See `backend/tests/helpers/db.ts`. `.env` is gitignored, so a fresh clone has to set both.
+- **`npm test` TRUNCATES tables in `inventory_dev`.** The tests run against `DATABASE_URL` unless `TEST_DATABASE_URL` is set, so anything sitting in the dev database is gone the moment the suite runs. That is deliberate — dev data is disposable, and keeping a second database in step was more setup than it was worth. Seed what you need in a fixture, not by hand.
+- The one rule the harness still enforces is that it **refuses to open `inventory`**, by name. Dev and production share a Postgres host, so the database name is the only thing that can tell them apart. See `backend/tests/helpers/db.ts`.
+- Anything in the `users` table outside mobiles `9000000000`–`9000000099` survives a test run — that block is reserved for fixtures, so the suite cannot delete the login you sign in with.
 - **Don't try to run the suite against the VPS as a habit** — every query is a ~2s round trip and sockets drop mid-run, so it fails on infrastructure rather than logic. CI runs a `postgres:18-alpine` service on the runner; that is where the suite is meant to run.
 - Migrations are forward-only files in `backend/src/db/migrations/`, applied with `npm run migrate`. The deploy pipeline does **not** run them, so a migration reaches production only when someone applies it by hand. Say explicitly which database you have applied one to.
 

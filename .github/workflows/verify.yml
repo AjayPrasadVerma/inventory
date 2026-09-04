@@ -30,9 +30,10 @@ jobs:
     name: Backend — typecheck & tests
     runs-on: ubuntu-latest
 
-    # A throwaway Postgres per run. The tests truncate tables, so they must never
-    # be pointed at a real database; the harness refuses to run unless the URL
-    # names a database containing "test", which is why POSTGRES_DB is inventory_test.
+    # A throwaway Postgres per run. Locally the suite falls back to DATABASE_URL
+    # and wipes the dev database, which is fine there and would be absurd here —
+    # so CI sets TEST_DATABASE_URL and gets a fresh empty database every time.
+    # The harness only hard-refuses the production database, by name.
     services:
       postgres:
         image: postgres:18-alpine

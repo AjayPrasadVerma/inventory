@@ -15,13 +15,33 @@ import { accessChangeProblem } from '../src/modules/auth/user-access.js';
 import { usersRepo } from '../src/modules/auth/users.repo.js';
 
 beforeAll(setupSchema);
-// users is neither transaction data nor catalogue, so the shared helpers leave
-// it alone and this file clears it itself. DELETE rather than TRUNCATE CASCADE:
-// five tables carry a created_by, so the cascade would take ACCESS EXCLUSIVE on
-// most of the schema — the deadlock the helpers go out of their way to avoid —
-// to clear rows nothing here ever creates.
-beforeEach(async () => { await query('DELETE FROM users'); });
-afterAll(async () => { await pool.end(); });
+/**
+ * users is neither transaction data nor catalogue, so the shared helpers leave
+ * it alone and this file clears it itself — but only the rows it made.
+ *
+ * `DELETE FROM users` was simpler and is what this did. The suite can now run
+ * against the dev database, where the real logins live, including the only owner
+ * able to reach the Users screen; clearing the table would delete them and leave
+ * nobody able to sign in. So every user made here takes a mobile in a reserved
+ * block, and only that block is cleared.
+ *
+ * A range rather than LIKE: the pattern would be a constant, but the repo bans
+ * unescaped LIKE and a comparison says the same thing without needing the
+ * exception. Fixed-length numeric strings compare the way you would expect.
+ */
+const TEST_MOBILE_LO = '9000000000';
+const TEST_MOBILE_HI = '9000000099';
+
+beforeEach(async () => {
+  await query('DELETE FROM users WHERE mobile >= $1 AND mobile <= $2', [TEST_MOBILE_LO, TEST_MOBILE_HI]);
+});
+// Clear up at the end too, not just before each test. The last test's users would
+// otherwise sit in the dev database until the suite next runs, and show up on the
+// Users screen as real logins that nobody created.
+afterAll(async () => {
+  await query('DELETE FROM users WHERE mobile >= $1 AND mobile <= $2', [TEST_MOBILE_LO, TEST_MOBILE_HI]);
+  await pool.end();
+});
 
 const make = (name: string, mobile: string, role: 'owner' | 'staff' = 'staff') =>
   usersRepo.create({ name, mobile, passwordHash: 'x', role });
@@ -68,14 +88,19 @@ describe('locking yourself out', () => {
 
 describe('otherActiveOwners', () => {
   it('counts only active owners, and never the user being changed', async () => {
+    // Measured as a delta: against the dev database the table already holds real
+    // owners, and since no row has id 0 this reads "every active owner there is".
+    const already = await usersRepo.otherActiveOwners(0);
+
     const a = await make('Owner A', '9000000001', 'owner');
     const b = await make('Owner B', '9000000002', 'owner');
     const c = await make('Owner C', '9000000003', 'owner');
     await make('Staff', '9000000004', 'staff');
     await usersRepo.update(c.id, { is_active: false });
 
-    expect(await usersRepo.otherActiveOwners(a.id)).toBe(1); // B only: C removed, staff is not an owner
-    expect(await usersRepo.otherActiveOwners(b.id)).toBe(1);
+    // B only: C was removed, and staff is not an owner.
+    expect(await usersRepo.otherActiveOwners(a.id)).toBe(already + 1);
+    expect(await usersRepo.otherActiveOwners(b.id)).toBe(already + 1);
   });
 });
 
