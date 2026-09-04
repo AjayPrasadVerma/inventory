@@ -71,8 +71,8 @@ Copy `backend/.env.example` to `backend/.env` and fill it in. The keys that matt
 
 | Key | What to put |
 |---|---|
-| `DATABASE_URL` | Point at **`inventory_dev`** on the VPS — never `inventory`, which is production. See CLAUDE.md §4. |
-| `TEST_DATABASE_URL` | `inventory_test` on the same server. The harness refuses to run without it, and refuses if it equals `DATABASE_URL` or the name lacks "test". |
+| `DATABASE_URL` | Point at **`inventory_dev`** on the VPS — never `inventory`, which is production. This is the only database you need; the tests use it too. See CLAUDE.md §4. |
+| `TEST_DATABASE_URL` | **Leave it empty.** It only exists so CI can point the suite at its own throwaway Postgres. Setting it here just means another database to keep in step. |
 | `JWT_SECRET` | Any long random string for local work. |
 | `CORS_ORIGIN` | `http://localhost:3000` for the web frontend. A native Flutter app sends no `Origin` header, so it needs no entry here — but a WebView-based build would. |
 | `SEED_OWNER_*` | Used by `npm run seed`, below. |
