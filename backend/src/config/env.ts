@@ -15,17 +15,17 @@ export const env = {
   /**
    * How long an access token lasts.
    *
-   * ACCESS_TOKEN_TTL is the name that means what it says; JWT_EXPIRES_IN is read
-   * after it so the deployments already setting that keep the lifetime they have.
-   * The fallback stays '7d' for the same reason — shortening it is a decision
-   * someone makes, not something a deploy does on its own.
+   * 15 minutes, now that both clients refresh: the web frontend renews silently
+   * on a 401 and repeats the request, and the mobile app is being written against
+   * the same endpoint. A short lifetime is the point of having refresh tokens —
+   * it is the window in which a stolen access token is worth anything, and unlike
+   * a refresh token it cannot be revoked, only outlived.
    *
-   * It should be short (15m) once every client can refresh. The web frontend
-   * cannot yet: it treats any 401 as the end of the session and returns to the
-   * login screen, so a short lifetime here would sign the shop out mid-afternoon.
-   * See MOBILE.md.
+   * ACCESS_TOKEN_TTL is the name that means what it says. JWT_EXPIRES_IN is read
+   * after it so a deployment still setting the old name keeps the lifetime it
+   * has and picks the new default up only when that line goes.
    */
-  jwtExpiresIn: process.env.ACCESS_TOKEN_TTL ?? process.env.JWT_EXPIRES_IN ?? '7d',
+  jwtExpiresIn: process.env.ACCESS_TOKEN_TTL ?? process.env.JWT_EXPIRES_IN ?? '15m',
   /** How long a refresh token lasts. Rotation means this is the ceiling on being
    *  away from the app, not on the session: each use pushes it out again. */
   refreshTokenTtlDays: Number(process.env.REFRESH_TOKEN_TTL_DAYS ?? 90),
