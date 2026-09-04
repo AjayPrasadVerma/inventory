@@ -61,13 +61,17 @@ Every failure on either path is **401 with the same sentence**, deliberately —
 - **Serialise refreshes.** Two requests hitting 401 together must not both refresh: one wins, the other looks like a replay and signs the user out. One in-flight refresh, with the rest waiting on it.
 - `flutter_secure_storage` for both tokens, never `SharedPreferences`.
 
-### The access-token lifetime is deliberately still 7 days
+### The access-token lifetime is 15 minutes
 
-`ACCESS_TOKEN_TTL` (new name) and `JWT_EXPIRES_IN` (old, still read) both set it, and the default stays **7d**.
+`ACCESS_TOKEN_TTL` (new name) and `JWT_EXPIRES_IN` (old, still read after it) both set it. The default is **15m**, which is short on purpose: an access token is the one credential here that cannot be revoked, only outlived.
 
-It *should* be 15m — that is the point of having refresh tokens — but **the web frontend cannot refresh yet**: `frontend/lib/api.ts` treats any 401 as the end of the session, clears the token and goes to `/login`. Shortening this before that is fixed would sign the shop out every fifteen minutes, and merging to `master` is a deploy. So: teach the web to refresh, then drop the default. Until then a phone can be given a short lifetime on its own by setting `ACCESS_TOKEN_TTL`, because it *does* refresh.
+The web frontend refreshes now — `frontend/lib/api.ts` renews on a 401 and repeats the request — so nothing is left waiting on that. **A `.env` still carrying `JWT_EXPIRES_IN=7d` keeps seven-day access tokens**, since the old name is still honoured; remove that line to pick the short default up.
 
 `REFRESH_TOKEN_TTL_DAYS` defaults to 90. Rotation re-dates it on every use, so it caps how long you can be **away** from the app, not how long you stay signed in.
+
+### The web client is the reference implementation
+
+`frontend/lib/api.ts` is worth reading before writing the Dart interceptor — it solves the same problems, and the serialisation one is easy to get wrong. It keeps a single in-flight refresh promise that every waiting request awaits, so a screen firing four calls at once refreshes once rather than four times. Four parallel refreshes would spend the same token four times, and the API reads a spent token as theft: it would sign the shop out of every device.
 
 ### What was not weakened
 
@@ -136,7 +140,7 @@ This is not a problem, it is just sequencing: the Flutter code is the same for b
 ## Suggested order
 
 1. ~~Refresh tokens on the API~~ — **done**, contract above.
-2. Teach the web frontend to refresh, then shorten `ACCESS_TOKEN_TTL` to 15m. No Flutter needed, and until it happens the access token stays a 7-day one on every client.
+2. ~~Teach the web frontend to refresh, then shorten the access token to 15m~~ — **done**. One server-side step remains: drop `JWT_EXPIRES_IN` from `/opt/inventory/.env.api` so production stops overriding the new default.
 3. Flutter project skeleton: HTTP client with an auth interceptor that refreshes on 401, secure token storage, login screen. Riverpod for state unless there is a reason to prefer otherwise.
 4. Dashboard, then karigar IN/OUT/Pay, then stock lookup.
 

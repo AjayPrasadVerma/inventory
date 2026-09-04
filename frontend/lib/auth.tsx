@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState } from "react";
-import { api, clearToken, getToken, setToken } from "./api";
+import { api, clearSession, getRefreshToken, getToken, setSession } from "./api";
 
 export type Role = "owner" | "staff";
 export interface AuthUser {
@@ -26,25 +26,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // it from an effect avoids a render pass that shows a spinner for no reason.
   const [loading, setLoading] = useState(() => !!getToken());
 
+  // On a reload the access token is usually expired now that it is short-lived.
+  // That is no longer a reason to sign out: api() refreshes and repeats this
+  // call, so only a session the server actually refuses lands in the catch.
   useEffect(() => {
     if (!getToken()) return;
     api<{ user: AuthUser }>("/auth/me")
       .then((r) => setUser(r.user))
-      .catch(() => clearToken())
+      .catch(() => clearSession())
       .finally(() => setLoading(false));
   }, []);
 
   async function login(mobile: string, password: string) {
-    const r = await api<{ token: string; user: AuthUser }>("/auth/login", {
-      method: "POST",
-      body: { mobile, password },
-    });
-    setToken(r.token);
+    const r = await api<{ token: string; accessToken?: string; refreshToken: string; user: AuthUser }>(
+      "/auth/login",
+      { method: "POST", body: { mobile, password } },
+    );
+    // accessToken is the name the API means; token is the alias it still sends
+    // for clients written before refresh existed.
+    setSession(r.accessToken ?? r.token, r.refreshToken);
     setUser(r.user);
   }
 
-  function logout() {
-    clearToken();
+  /**
+   * Signing out now has a server side: the refresh token outlives the page, so
+   * dropping it locally would leave a session the API would still renew.
+   *
+   * The call is awaited but never allowed to fail the sign-out — the tokens are
+   * discarded either way, and a user who asked to leave must not be kept on the
+   * page by a dropped request. A refresh token left behind expires on its own.
+   */
+  async function logout() {
+    const refreshToken = getRefreshToken();
+    if (refreshToken) {
+      await api("/auth/logout", { method: "POST", body: { refreshToken } }).catch(() => {});
+    }
+    clearSession();
     setUser(null);
     window.location.href = "/login";
   }

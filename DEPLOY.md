@@ -27,7 +27,6 @@ Create `backend/.env` (NOT committed):
 cat > backend/.env <<'EOF'
 DATABASE_URL=postgres://acronix:YOUR_DB_PASSWORD@localhost:5432/inventory
 JWT_SECRET=PASTE_A_LONG_RANDOM_STRING     # generate: openssl rand -hex 48
-JWT_EXPIRES_IN=7d
 PORT=3031
 NODE_ENV=production
 CORS_ORIGIN=https://inventory.acronix.in
@@ -39,6 +38,8 @@ EOF
 Notes:
 - Use **localhost** in DATABASE_URL — backend and DB are on the same box, so traffic never leaves it (no TLS needed, and we firewall 5432 below).
 - `SEED_OWNER_PASSWORD` is **required** (no insecure default) — set a real one.
+- **No `JWT_EXPIRES_IN` line.** Access tokens default to 15 minutes and both clients renew silently through `POST /api/auth/refresh`. An existing `.env` carrying `JWT_EXPIRES_IN=7d` keeps seven-day access tokens — that name is still read, after `ACCESS_TOKEN_TTL` — so **delete that line** to pick the short default up. The running server reads its env from `/opt/inventory/.env.api`, not from this file.
+- Migrations are **not** run by the deploy. Apply them by hand (`npm run migrate`) before the code that needs them ships — see CLAUDE.md §4.
 
 Install (tsx is a devDependency and is needed to run — do a **full** install, not `--omit=dev`):
 ```bash
