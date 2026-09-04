@@ -36,20 +36,46 @@ Mitigations, in order of how much they help:
 
 ---
 
-## Before any Flutter is written: the API needs refresh tokens
+## Refresh tokens — **built**, and this is the contract
 
-This is the one genuine API prerequisite, and it is not optional.
+This was the one genuine API prerequisite. It is done; the endpoints below are what the Dart models decode.
 
-`JWT_EXPIRES_IN` is **7 days** with no refresh token (`backend/src/config/env.ts`, `backend/src/middleware/auth.ts`). On the web that is invisible — the browser is open, the session is short-lived by nature. On a phone it means **being thrown back to the login screen every week**, which nobody accepts from an app.
+`POST /api/auth/login` — body `{ mobile, password }`:
 
-What is needed:
+```json
+{ "token": "<jwt>", "accessToken": "<jwt>", "refreshToken": "<opaque>",
+  "user": { "id": 1, "name": "…", "role": "owner" } }
+```
 
-- Login returns an **access token** (short, e.g. 15 min) and a **refresh token** (long, e.g. 90 days).
-- A `POST /api/auth/refresh` that trades a refresh token for a new pair and **rotates** the refresh token.
-- Refresh tokens stored server-side so removing a user kills their refresh token too — otherwise the removal work described below is undone by the refresh path.
-- On the client: `flutter_secure_storage` for both tokens, never `SharedPreferences`.
+`token` and `accessToken` are the **same value**. `token` is the old name and only still exists because the web frontend reads exactly that field; merging deploys the site, so renaming it would have signed everyone out at the moment of the deploy. **Mobile should read `accessToken`** — the alias goes once the web moves.
 
-**Do not weaken what is already there.** `requireAuth` re-reads the account on every request (30s cache, `forgetUser()` clears it on write), so removing a user or changing their role takes effect on their next request rather than in seven days. That was deliberate — see the user module commit — and it works for mobile unchanged. Any refresh endpoint must run the same check.
+`POST /api/auth/refresh` — body `{ refreshToken }`, returns the same shape with a **new refresh token**. The old one is spent by the call.
+
+`POST /api/auth/logout` — body `{ refreshToken }`, returns `{ "ok": true }`. Ends that one session. Neither refresh nor logout needs an access token: both have to work once it has expired, which is the only time either is reached.
+
+Every failure on either path is **401 with the same sentence**, deliberately — which of the reasons it was is not something the response should reveal, and the app does the same thing in all of them: sign in again.
+
+### What the client must get right
+
+- **Rotation is not optional.** A refresh token is spent by using it. Store the new one before the old is discarded, and never send the same one twice — a replayed token is treated as stolen and **ends every session that user has**, on every device.
+- **Serialise refreshes.** Two requests hitting 401 together must not both refresh: one wins, the other looks like a replay and signs the user out. One in-flight refresh, with the rest waiting on it.
+- `flutter_secure_storage` for both tokens, never `SharedPreferences`.
+
+### The access-token lifetime is deliberately still 7 days
+
+`ACCESS_TOKEN_TTL` (new name) and `JWT_EXPIRES_IN` (old, still read) both set it, and the default stays **7d**.
+
+It *should* be 15m — that is the point of having refresh tokens — but **the web frontend cannot refresh yet**: `frontend/lib/api.ts` treats any 401 as the end of the session, clears the token and goes to `/login`. Shortening this before that is fixed would sign the shop out every fifteen minutes, and merging to `master` is a deploy. So: teach the web to refresh, then drop the default. Until then a phone can be given a short lifetime on its own by setting `ACCESS_TOKEN_TTL`, because it *does* refresh.
+
+`REFRESH_TOKEN_TTL_DAYS` defaults to 90. Rotation re-dates it on every use, so it caps how long you can be **away** from the app, not how long you stay signed in.
+
+### What was not weakened
+
+`requireAuth` is untouched. It still re-reads the account on every request (30s cache, `forgetUser()` clears it on write), so removing a user or changing their role bites on their next request rather than in seven days.
+
+The refresh route makes **the same live check** — it re-reads the account and refuses a removed user — and removal now revokes their stored refresh tokens outright. Without both halves, removing someone would stop their next request and then hand them a fresh token a minute later. A password change ends their sessions too.
+
+A demotion deliberately does *not* end the session: both `requireAuth` and the refresh route take the role from the live row, so the smaller role is already in force.
 
 ## What NOT to spend time on
 
@@ -109,8 +135,9 @@ This is not a problem, it is just sequencing: the Flutter code is the same for b
 
 ## Suggested order
 
-1. Refresh tokens on the API (no Flutter needed — can be done from either machine).
-2. Flutter project skeleton: HTTP client with an auth interceptor that refreshes on 401, secure token storage, login screen. Riverpod for state unless there is a reason to prefer otherwise.
-3. Dashboard, then karigar IN/OUT/Pay, then stock lookup.
+1. ~~Refresh tokens on the API~~ — **done**, contract above.
+2. Teach the web frontend to refresh, then shorten `ACCESS_TOKEN_TTL` to 15m. No Flutter needed, and until it happens the access token stays a 7-day one on every client.
+3. Flutter project skeleton: HTTP client with an auth interceptor that refreshes on 401, secure token storage, login screen. Riverpod for state unless there is a reason to prefer otherwise.
+4. Dashboard, then karigar IN/OUT/Pay, then stock lookup.
 
 Each of those is a normal PR onto `claude/features` — and remember that merging to `master` deploys the website. A mobile-only change still goes through the same pipeline, so keep the PR green.
