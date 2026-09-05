@@ -91,9 +91,13 @@ karigarEntriesRouter.get(
   '/suggest',
   asyncHandler(async (req, res) => {
     const q = z
-      .object({ direction: z.enum(['in', 'out']), q: z.string().trim().max(200).default('') })
+      .object({
+        direction: z.enum(['in', 'out']),
+        q: z.string().trim().max(200).default(''),
+        limit: z.coerce.number().int().min(1).max(100).default(20),
+      })
       .parse(req.query);
-    const data = await karigarEntriesRepo.suggest(q.direction, q.q);
+    const data = await karigarEntriesRepo.suggest(q.direction, q.q, q.limit);
     res.json({ data });
   }),
 );
