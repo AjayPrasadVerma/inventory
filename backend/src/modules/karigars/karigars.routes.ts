@@ -42,9 +42,15 @@ karigarsRouter.get(
 
 karigarsRouter.get(
   '/options',
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    const q = z
+      .object({
+        q: z.string().trim().max(200).default(''),
+        limit: z.coerce.number().int().min(1).max(1000).default(500),
+      })
+      .parse(req.query);
     res.set('Cache-Control', 'private, max-age=60');
-    res.json({ data: await karigarsRepo.options() });
+    res.json({ data: await karigarsRepo.options({ q: q.q, limit: q.limit }) });
   }),
 );
 

@@ -14,6 +14,19 @@ export interface ComboboxProps {
   options: ComboOption[];
   value: string;
   onChange: (value: string) => void;
+  /**
+   * Ask the server instead of filtering `options` here.
+   *
+   * For a list the page can hold — a handful of payment modes, a few hundred
+   * karigars — leave this off and pass `options`; filtering in the browser is
+   * instant and costs nothing. Give it a search when the list is one nobody
+   * should be downloading whole, and pass whatever is already known as `options`
+   * so the chosen row still has a label before the first query returns.
+   */
+  search?: (query: string) => Promise<ComboOption[]>;
+  /** The whole option that was picked, for callers that need its label and
+   *  cannot look it up — a searched list does not stay on the page. */
+  onPick?: (option: ComboOption) => void;
   placeholder?: string;
   emptyText?: string;
   invalid?: boolean;
@@ -40,6 +53,8 @@ export function Combobox({
   options,
   value,
   onChange,
+  search,
+  onPick,
   placeholder = "Search…",
   emptyText = "No results",
   invalid,
@@ -54,6 +69,8 @@ export function Combobox({
   const [query, setQuery] = React.useState("");
   const [highlight, setHighlight] = React.useState(0);
   const [pos, setPos] = React.useState<PanelPos | null>(null);
+  const [found, setFound] = React.useState<ComboOption[]>([]);
+  const [loading, setLoading] = React.useState(false);
 
   const rootRef = React.useRef<HTMLDivElement>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -62,16 +79,38 @@ export function Combobox({
   const baseId = React.useMemo(() => `combobox-${++idCounter}`, []);
   const listId = `${baseId}-list`;
 
-  const selected = React.useMemo(() => options.find((o) => o.value === value), [options, value]);
-  const selectedLabel = selected ? selected.label : "";
+  /** What was chosen, remembered — a searched list is replaced by the next
+   *  query, and the box must keep showing the name that was picked from it. */
+  const [chosen, setChosen] = React.useState<ComboOption | null>(null);
+  const selected = React.useMemo(
+    () => options.find((o) => o.value === value) ?? found.find((o) => o.value === value),
+    [options, found, value],
+  );
+  const selectedLabel = value ? (selected?.label ?? chosen?.label ?? "") : "";
 
   const filtered = React.useMemo(() => {
+    if (search) return found;
     const q = query.trim().toLowerCase();
     if (!q) return options;
     return options.filter(
       (o) => o.label.toLowerCase().includes(q) || (o.sublabel && o.sublabel.toLowerCase().includes(q)),
     );
-  }, [options, query]);
+  }, [options, query, search, found]);
+
+  // Run the search on a settled keystroke, and drop a slow answer to an old
+  // query that lands after a fast answer to a newer one.
+  const generation = React.useRef(0);
+  React.useEffect(() => {
+    if (!search || !open) return;
+    const mine = ++generation.current;
+    const t = setTimeout(() => {
+      setLoading(true);
+      search(query.trim())
+        .then((rows) => { if (mine === generation.current) { setFound(rows); setLoading(false); } })
+        .catch(() => { if (mine === generation.current) { setFound([]); setLoading(false); } });
+    }, 220);
+    return () => clearTimeout(t);
+  }, [search, open, query]);
 
   const displayValue = open ? query : selectedLabel;
 
@@ -124,7 +163,9 @@ export function Combobox({
   }, [highlight, open, baseId, filtered]);
 
   function commit(opt: ComboOption) {
+    setChosen(opt);
     onChange(opt.value);
+    onPick?.(opt);
     setOpen(false);
     setQuery("");
     onEnterSelect?.();
@@ -164,6 +205,7 @@ export function Combobox({
     e.preventDefault();
     e.stopPropagation();
     onChange("");
+    setChosen(null);
     setQuery("");
     setHighlight(0);
     inputRef.current?.focus();
@@ -226,7 +268,9 @@ export function Combobox({
             }}
             className="z-50 overflow-y-auto rounded-lg border border-border bg-surface shadow-[var(--shadow-md)] py-1"
           >
-            {filtered.length === 0 ? (
+            {loading && filtered.length === 0 ? (
+              <li role="option" aria-selected={false} aria-disabled className="px-3 py-2 text-sm text-muted">Searching…</li>
+            ) : filtered.length === 0 ? (
               <li role="option" aria-selected={false} aria-disabled className="px-3 py-2 text-sm text-muted">{emptyText}</li>
             ) : (
               filtered.map((opt, i) => {

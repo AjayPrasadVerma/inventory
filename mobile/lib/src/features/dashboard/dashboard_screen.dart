@@ -5,6 +5,8 @@ import '../../api/api_exception.dart';
 import '../../models/auth.dart';
 import '../../theme.dart';
 import '../auth/auth_controller.dart';
+import '../entry/entry_controller.dart';
+import '../entry/entry_screen.dart';
 import 'activity_controller.dart';
 import 'dashboard_controller.dart';
 import 'widgets/attention_list.dart';
@@ -57,7 +59,7 @@ class DashboardScreen extends ConsumerWidget {
               ),
               sliver: SliverList.list(
                 children: [
-                  QuickActions(onAction: (a) => _notBuiltYet(context, a)),
+                  QuickActions(onAction: (a) => _act(context, ref, a)),
 
                   // The date control sits on the title's own row rather than
                   // under it. Two stacked rows of chrome above a feed is most of
@@ -109,12 +111,47 @@ class DashboardScreen extends ConsumerWidget {
     );
   }
 
-  void _notBuiltYet(BuildContext context, QuickAction action) {
+  /// IN and OUT open the entry form; PAY is still to come.
+  Future<void> _act(
+    BuildContext context,
+    WidgetRef ref,
+    QuickAction action,
+  ) async {
+    final direction = switch (action) {
+      QuickAction.materialIn => EntryDirection.materialIn,
+      QuickAction.materialOut => EntryDirection.materialOut,
+      QuickAction.pay => null,
+    };
+    if (direction == null) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('PAY is the next screen to be built.')),
+        );
+      return;
+    }
+
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => EntryScreen(direction: direction)),
+    );
+    if (saved != true || !context.mounted) return;
+
+    // Both halves of the screen change when an entry is saved — the feed gains a
+    // row and the stock behind "needs attention" has moved — so both refresh.
+    await Future.wait([
+      ref.read(dashboardProvider.notifier).refresh(),
+      ref.read(activityProvider.notifier).refresh(),
+    ]);
+    if (!context.mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          content: Text('${action.label} is the next screen to be built.'),
+          content: Text(
+            direction == EntryDirection.materialOut
+                ? 'Material issued'
+                : 'Goods received',
+          ),
         ),
       );
   }

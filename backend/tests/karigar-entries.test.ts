@@ -213,4 +213,23 @@ describe('suggestions', () => {
     const all = await karigarEntriesRepo.suggest('out', '%');
     expect(all).toHaveLength(0);
   });
+
+  it('caps what a blank search returns', async () => {
+    // A blank query is what every picker sends on mount, and each name carries
+    // its sizes and its colours with it. Uncapped, that is the whole catalogue
+    // — thousands of rows — for a list that shows six.
+    await query(
+      `INSERT INTO items (name, category)
+       SELECT 'Bulk Cloth ' || g, 'Kapda' FROM generate_series(1, 40) AS g`,
+    );
+    const page = await karigarEntriesRepo.suggest('out', '', 5);
+    expect(page).toHaveLength(5);
+
+    const dflt = await karigarEntriesRepo.suggest('out', '');
+    expect(dflt).toHaveLength(20);
+
+    // The cap is a page, not a filter: a search still reaches past it.
+    const found = await karigarEntriesRepo.suggest('out', 'Bulk Cloth 39');
+    expect(found.map((r) => r.name)).toContain('Bulk Cloth 39');
+  });
 });
