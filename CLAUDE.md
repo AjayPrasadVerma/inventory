@@ -107,6 +107,6 @@ Don't extend, refactor or "tidy" them, and don't count them when asked to clean 
 
 ## Reference
 
-- Mobile app (Flutter, Android first): [MOBILE.md](MOBILE.md) — decisions, the API work it needs first, and how to set up on the Windows machine. Nothing is built yet.
+- Mobile app (Flutter, Android first): [MOBILE.md](MOBILE.md) — decisions, the API contract it consumes, the app as built in `mobile/`, and how to set up on the Windows machine. The refresh-token API and the Flutter skeleton are done; nothing has run on a device yet.
 - Deployment: [DEPLOY.md](DEPLOY.md)
 - Frontend framework caveats: [frontend/AGENTS.md](frontend/AGENTS.md) — this Next.js differs from training data; read `node_modules/next/dist/docs/` first.

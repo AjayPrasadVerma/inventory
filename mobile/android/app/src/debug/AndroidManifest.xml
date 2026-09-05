@@ -1,0 +1,18 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The INTERNET permission is required for development. Specifically,
+         the Flutter tool needs it to communicate with the running application
+         to allow setting breakpoints, to provide hot reload, etc.
+    -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- Android blocks plain http by default (API 28+), and the dev API is
+         http://10.0.2.2:4000 — the emulator's name for the host machine. Without
+         this, every request fails with a cleartext error that reads like the
+         server is down.
+
+         Debug manifest only, so it is merged into debug builds and never into a
+         release one: production talks to https://inventory.acronix.in/api, which
+         needs no exception and must not have one.
+    -->
+    <application android:usesCleartextTraffic="true"/>
+</manifest>

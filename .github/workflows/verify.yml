@@ -86,3 +86,27 @@ jobs:
       - run: npx tsc --noEmit
       - run: npx eslint .
       - run: npm run build
+
+  mobile:
+    name: Mobile — analyze & tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      # No Android SDK and no emulator: `flutter analyze` and `flutter test` are
+      # pure Dart and need neither. Building an APK does, and is not done here —
+      # that would pull the whole Android toolchain onto every PR to catch
+      # nothing these two miss.
+      - uses: subosito/flutter-action@v2
+        with:
+          # Pinned, not "latest stable": a Flutter release should break CI on the
+          # commit that bumps it, not on an unrelated PR opened the same morning.
+          flutter-version: 3.47.2
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed .
+      - run: flutter analyze
+      - run: flutter test
