@@ -1,6 +1,6 @@
 # Mobile app — handoff
 
-Written 2026-09-02 on the Mac, to be picked up on the Windows machine. **Nothing is built yet.** This file is the decisions, the groundwork and the traps, so whoever starts does not have to re-decide any of it or rediscover it the hard way.
+Written 2026-09-02 on the Mac, picked up on the Windows machine. The **API work is done and the Flutter skeleton exists** — see the contract and the app structure below. This file is the decisions, the groundwork and the traps, so nobody has to re-decide any of it or rediscover it the hard way.
 
 Read [CLAUDE.md](CLAUDE.md) first — the branching, database and testing rules there apply to this work too.
 
@@ -32,7 +32,7 @@ Mitigations, in order of how much they help:
 
 1. Keep every model in one directory, one file per endpoint group. Never parse JSON inline in a widget.
 2. When you change a payload in `backend/src/modules/**`, grep the Dart models in the same commit. Treat it like the existing rule in CLAUDE.md §3 about create-vs-PATCH schemas drifting apart — that has already bitten this repo once.
-3. Write a contract test that hits a running API and decodes into the models. It catches drift at CI time rather than in the shop.
+3. Write a contract test that hits a running API and decodes into the models. It catches drift at CI time rather than in the shop. `backend/tests/activity-feed.test.ts` pins the day-feed payload from the server side, which is half of it.
 
 ---
 
@@ -125,11 +125,94 @@ Ports and commands are in CLAUDE.md §5 — frontend on 3000, API on 4000. Check
 
 ### Flutter toolchain
 
-None of it is installed on the Mac, and it will not be on Windows either. Needed: Flutter SDK, Android Studio, the Android SDK and a JDK — roughly 12–15 GB. Android Studio's first run (SDK download and accepting licences) has to be done through its GUI.
+Everything lives on **D:**, deliberately — C: was down to 10 GB and Gradle alone reaches several.
 
-Point the app at `http://10.0.2.2:4000/api` from the Android emulator — `localhost` inside the emulator is the emulator itself, not the machine.
+| | |
+|---|---|
+| Flutter 3.47.2 / Dart 3.13.2 | `D:\flutter` |
+| Android Studio 2026.1 (Quail 4) | `D:\Android\Android Studio` |
+| Android SDK | `D:\Android\sdk` — `ANDROID_HOME`, `ANDROID_SDK_ROOT` |
+| Emulator AVDs | `D:\Android\avd` — `ANDROID_AVD_HOME` |
+| Gradle caches | `D:\dev\gradle` — `GRADLE_USER_HOME` |
+| Pub cache | `D:\dev\pub-cache` — `PUB_CACHE` |
+
+Installed SDK packages: platform `android-37.0`, build-tools 36.0.0 and 37.0.0, platform-tools 37.0.1, NDK 28.2.13676358 and 30.0.16138531, CMake 3.22.1.
+
+### Three Android traps, all hit and all solved
+
+**1. `compileSdk` must be 37, and this is not optional.** `flutter_secure_storage` 11 declares in its AAR metadata that dependants compile against API 37 or later; with Flutter's default of 36 the build dies at `:app:checkDebugAarMetadata`. `android/app/build.gradle.kts` pins `compileSdk = 37` with the reason written next to it. AGP 9.1.0 calls 36 its "maximum recommended" — a recommendation, not a limit; it builds. `minSdk` and `targetSdk` are untouched, so which phones can install the app has not changed.
+
+**2. Gradle cannot install SDK packages any more.** AGP provisions a missing NDK by shelling out to cmdline-tools' `sdkmanager`, which Google has replaced with a shim over the new `android` CLI — and the shim **crashes** (`NTSTATUS 0xC0000409`) instead of installing. Anything the build needs must be installed by hand from Android Studio's SDK Manager first. Removing `ndkVersion` from the app's gradle file does *not* dodge this: the Flutter Gradle Plugin hardcodes it (`FlutterExtension.kt`).
+
+**3. `flutter doctor` reports "Android license status unknown", and it is wrong.** The new `android` CLI has no licences command, so `flutter doctor --android-licenses` answers "no longer needed" and Flutter cannot read the status. Licences are fine — builds complete. Ignore that line.
+
+### Running it on a real phone (better than the emulator)
+
+No system image to download, and real performance. This is how the app was first verified:
+
+```bash
+adb devices                        # phone must show as "device"
+adb reverse tcp:4000 tcp:4000      # phone's localhost:4000 -> this machine's
+npm run dev --prefix backend       # API on 4000
+cd mobile && flutter run --dart-define=API_BASE_URL=http://localhost:4000/api
+```
+
+`adb reverse` tunnels over USB, so no WiFi, no LAN IP and no `10.0.2.2`. On the phone: Developer options on (tap Build number 7 times), USB debugging on, and accept the RSA prompt.
+
+For the **emulator** instead, the API is `http://10.0.2.2:4000/api` — `localhost` inside the emulator is the emulator. That is the default in `lib/src/config/app_config.dart`.
+
+Android blocks plain http, so the debug manifest carries `usesCleartextTraffic` — debug only, since production is https.
+
+**Judge performance on a release build, never a debug one.** Debug Flutter is JIT with every assertion on; it is meant to be slow.
 
 ---
+
+## The app, as built
+
+Lives in `mobile/`, package `acronix_inventory`. Riverpod for state, per the decision above.
+
+```
+mobile/lib/
+  main.dart                       ProviderScope + AcronixApp, nothing else
+  src/
+    app.dart                      one decision: who is signed in decides the screen
+    config/app_config.dart        API base URL (--dart-define=API_BASE_URL to override)
+    api/
+      api_client.dart             every request goes through here — see below
+      token_store.dart            TokenStore interface + the flutter_secure_storage one
+      api_exception.dart          what the server refused, in the server's words
+    models/                       ALL JSON decoding lives here and nowhere else
+      auth.dart                   AuthUser, Session, Role
+      json.dart                   field readers that name what drifted
+    features/
+      auth/                       auth_controller.dart (AsyncNotifier), login_screen.dart
+      home/                       placeholder; the real screens are step 4
+```
+
+### Why a hand-rolled client and not dio
+
+`frontend/lib/api.ts` already solves this exact problem, and keeping the two shaped alike means a fix to one is obviously portable to the other. It also stays testable with a plain `http.Client` stub, which is what makes the single-flight rule provable instead of hoped for — `mobile/test/api_client_test.dart` holds four requests at their 401s simultaneously and asserts **one** refresh call.
+
+### The rule that is easy to break
+
+Nothing outside `lib/src/models/` may call `jsonDecode` on an API reply. That is mitigation 1 from "the one real risk" above, and it is the only reason a renamed backend field produces `Session: expected a value at "refreshToken"` instead of a null-check crash three widgets deep.
+
+`models/json.dart` exists for that message. When you change a payload in `backend/src/modules/**`, grep `mobile/lib/src/models/` in the same commit.
+
+### What is NOT done
+
+- **Recording anything.** IN, OUT and PAY sit on the dashboard and say so when tapped; the forms behind them are the next screens, along with stock lookup.
+- **No contract test against a running API** — mitigation 3 above. The model tests pin today's payload shape by hand, which catches a rename only if someone updates the fixture; a test that logs into a real API would catch it on its own.
+- No router. One screen decides the other; adding a router before there is somewhere to route would be guessing.
+- **Nothing is cached on disk.** A cold start shows skeletons until the API answers. Riverpod holds the data while the app is alive, which is not the same as the cache-first rule surviving a restart.
+- **iOS untouched** — the platform folder exists, nothing more.
+
+### What HAS been verified on a real phone
+
+Signed in on a Vivo V2318 over USB against the local API: login succeeded, the `Session` decoded, both tokens went into `flutter_secure_storage`, the app routed to the home screen, and a `refresh_tokens` row appeared server-side for that session. So the plumbing this step exists to build is real, not just analysed.
+
+---
+
 
 ## iOS, later
 
@@ -137,11 +220,13 @@ Point the app at `http://10.0.2.2:4000/api` from the Android emulator — `local
 
 This is not a problem, it is just sequencing: the Flutter code is the same for both. Build Android on Windows, and when iOS comes up, pull the same repo on the Mac and build there. Nothing gets rewritten.
 
+---
+
 ## Suggested order
 
 1. ~~Refresh tokens on the API~~ — **done**, contract above.
 2. ~~Teach the web frontend to refresh, then shorten the access token to 15m~~ — **done**. One server-side step remains: drop `JWT_EXPIRES_IN` from `/opt/inventory/.env.api` so production stops overriding the new default.
-3. Flutter project skeleton: HTTP client with an auth interceptor that refreshes on 401, secure token storage, login screen. Riverpod for state unless there is a reason to prefer otherwise.
-4. Dashboard, then karigar IN/OUT/Pay, then stock lookup.
+3. ~~Flutter project skeleton~~ — **done**, structure above, and verified by signing in on a real phone. The three Android traps it uncovered are written up under "Flutter toolchain".
+4. ~~Dashboard~~ — **done**: the day feed with a date picker, an entry detail page, and what needs restocking. Next: the karigar IN / OUT / Pay forms, then stock lookup.
 
 Each of those is a normal PR onto `claude/features` — and remember that merging to `master` deploys the website. A mobile-only change still goes through the same pipeline, so keep the PR green.
