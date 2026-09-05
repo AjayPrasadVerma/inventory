@@ -34,6 +34,20 @@ String count(num value) {
   return '${negative ? '-' : ''}${_group(digits)}';
 }
 
+/// Money, matching the web's `rupees()`. Whole rupees only when the paise are
+/// zero — a shop reads ₹1,200 faster than ₹1,200.00, and the decimals only earn
+/// their place when they carry something.
+String rupees(num value) {
+  final negative = value < 0;
+  final abs = value.abs();
+  final paise = (abs * 100).round() % 100;
+  final whole = _group(abs.truncate().toString());
+  final body = paise == 0
+      ? whole
+      : '$whole.${paise.toString().padLeft(2, '0')}';
+  return '${negative ? '-' : ''}₹$body';
+}
+
 /// A quantity, trimming trailing zeros so 2.500 reads as 2.5 and 3.000 as 3.
 /// Matches the web's `qty()`, which allows up to three decimals.
 String qty(num value) {

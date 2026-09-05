@@ -5,9 +5,14 @@ import '../../../theme.dart';
 /// IN, OUT and PAY — the three things done while walking around the shop.
 ///
 /// These are the reason the app exists (MOBILE.md: "the standing up in the shop
-/// flows"), so they get the largest targets on the screen and sit low, where a
-/// thumb reaches without the hand shifting its grip. Everything above them is
-/// something to read; these are the things to press.
+/// flows"), so they get the largest targets on the screen and the only fully
+/// saturated colour on it. Everything above and below them is something to read;
+/// these are the things to press, and they should look like it from across a
+/// room.
+///
+/// Solid blocks rather than tinted outlines. The reference palettes spend their
+/// colour exactly this way — a quiet ground with a few blocks that commit — and
+/// a bordered pastel tile reads as disabled next to a filled one.
 class QuickActions extends StatelessWidget {
   const QuickActions({super.key, required this.onAction});
 
@@ -20,7 +25,7 @@ class QuickActions extends StatelessWidget {
     return Row(
       children: [
         for (final (index, action) in QuickAction.values.indexed) ...[
-          if (index > 0) const SizedBox(width: AppTheme.gap * 1.5),
+          if (index > 0) const SizedBox(width: AppTheme.gap * 1.25),
           Expanded(
             child: _ActionTile(
               action: action,
@@ -63,36 +68,42 @@ class _ActionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    // Black or white text, whichever the block can actually carry. Orange needs
+    // dark text; violet needs light. Computed rather than chosen, so a colour
+    // change later cannot quietly leave one tile unreadable.
+    final onColor =
+        ThemeData.estimateBrightnessForColor(color) == Brightness.dark
+        ? Colors.white
+        : const Color(0xFF1A1D23);
 
     return Semantics(
       button: true,
       label: '${action.label} — ${action.hint}',
       child: Material(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(AppTheme.gap * 2),
+        color: color,
+        borderRadius: BorderRadius.circular(AppTheme.gap * 1.75),
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(AppTheme.gap * 2),
-          child: Container(
-            // 96 tall. Far above Material's 48 minimum, and on purpose: this is
-            // pressed with one thumb, in a hurry, sometimes without looking.
-            height: 96,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(AppTheme.gap * 2),
-              border: Border.all(color: color.withValues(alpha: 0.35)),
-            ),
-            child: Column(
+          borderRadius: BorderRadius.circular(AppTheme.gap * 1.75),
+          child: SizedBox(
+            // 56 tall, with the icon beside the label rather than above it. The
+            // stacked version was 86 and looked like it was holding something
+            // back — a button does not need to be a card. Still comfortably over
+            // Material's 48 minimum, which is what actually matters for a thumb
+            // in a hurry.
+            height: 56,
+            child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(action.icon, color: color, size: 26),
-                const SizedBox(height: AppTheme.gap * 0.75),
+                Icon(action.icon, color: onColor, size: 19),
+                const SizedBox(width: AppTheme.gap * 0.75),
                 Text(
                   action.label,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: color,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.5,
+                  style: TextStyle(
+                    color: onColor,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.8,
                   ),
                 ),
               ],

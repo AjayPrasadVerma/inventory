@@ -6,17 +6,17 @@ import '../../../theme.dart';
 
 /// Stock that is low, or that has gone past zero.
 ///
-/// The only part of the dashboard that is a to-do list rather than a number, so
-/// it reads as rows to work through. Oversold is separated from low by colour
-/// and wording because they are different problems: low means order more,
-/// oversold means the books disagree with the shelf.
+/// The one part of this screen that is a list of work rather than a record of
+/// what happened, so it reads as rows to get through. Oversold is separated from
+/// low by colour and wording because they are different problems: low means
+/// order more, oversold means the books disagree with the shelf.
 class AttentionList extends StatelessWidget {
   const AttentionList({super.key, required this.rows});
 
   final List<AttentionRow> rows;
 
-  /// Long lists are cut here rather than scrolled inside a scrolling page. If
-  /// forty things need attention, a phone is not where that gets worked through.
+  /// If forty things need attention, a phone is not where that gets worked
+  /// through — the website has the full report.
   static const _visibleLimit = 6;
 
   @override
@@ -25,26 +25,29 @@ class AttentionList extends StatelessWidget {
     final scheme = theme.colorScheme;
 
     if (rows.isEmpty) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppTheme.gap * 2,
-            vertical: AppTheme.gap * 3,
-          ),
-          child: Row(
-            children: [
-              Icon(Icons.check_circle_rounded, color: scheme.inColor, size: 22),
-              const SizedBox(width: AppTheme.gap * 1.5),
-              Expanded(
-                child: Text(
-                  'Nothing low or oversold — stock levels look healthy.',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
+      return Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppTheme.gap * 1.5,
+          vertical: AppTheme.gap * 2,
+        ),
+        decoration: BoxDecoration(
+          color: scheme.tintOf(scheme.inColor),
+          borderRadius: BorderRadius.circular(AppTheme.gap * 1.5),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.check_circle_rounded, color: scheme.inColor, size: 20),
+            const SizedBox(width: AppTheme.gap * 1.5),
+            Expanded(
+              child: Text(
+                'Nothing low or oversold — stock levels look healthy.',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: scheme.inColor,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       );
     }
@@ -52,41 +55,24 @@ class AttentionList extends StatelessWidget {
     final shown = rows.take(_visibleLimit).toList();
     final hidden = rows.length - shown.length;
 
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          for (final (index, row) in shown.indexed) ...[
-            if (index > 0) const Divider(),
-            _AttentionTile(row: row),
-          ],
-          if (hidden > 0) ...[
-            const Divider(),
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppTheme.gap * 2,
-                vertical: AppTheme.gap * 1.5,
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.more_horiz_rounded,
-                    size: 18,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: AppTheme.gap),
-                  Text(
-                    '$hidden more on the website',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final row in shown) ...[
+          _AttentionTile(row: row),
+          const SizedBox(height: AppTheme.gap * 0.75),
+        ],
+        if (hidden > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: AppTheme.gap * 0.5),
+            child: Text(
+              '$hidden more on the website',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
               ),
             ),
-          ],
-        ],
-      ),
+          ),
+      ],
     );
   }
 }
@@ -100,13 +86,19 @@ class _AttentionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final bad = row.isOversold;
-    final tone = bad ? scheme.warnColor : scheme.outColor;
+    // Oversold is danger, low is warning — the same split the website makes
+    // (tone={a.status === "Oversold" ? "danger" : "warning"} in its dashboard).
+    final tone = row.isOversold ? scheme.warnColor : scheme.lowColor;
 
-    return Padding(
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(AppTheme.gap * 1.5),
+        border: Border(left: BorderSide(color: tone, width: 4)),
+      ),
       padding: const EdgeInsets.symmetric(
-        horizontal: AppTheme.gap * 2,
-        vertical: AppTheme.gap * 1.5,
+        horizontal: AppTheme.gap * 1.5,
+        vertical: AppTheme.gap * 1.25,
       ),
       child: Row(
         children: [
@@ -114,13 +106,23 @@ class _AttentionTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  row.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+                Row(
+                  children: [
+                    // Raw or Finished. Two things can share a name across the
+                    // two catalogues, so the kind is not decoration.
+                    _KindBadge(kind: row.kind),
+                    const SizedBox(width: AppTheme.gap),
+                    Flexible(
+                      child: Text(
+                        row.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 if (row.subtitle.isNotEmpty) ...[
                   const SizedBox(height: 2),
@@ -152,20 +154,51 @@ class _AttentionTile extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
-                  color: tone.withValues(alpha: 0.14),
+                  color: scheme.tintOf(tone),
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
                   row.status,
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: tone,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _KindBadge extends StatelessWidget {
+  const _KindBadge({required this.kind});
+
+  final String kind;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    // The route sends "Raw" / "Finished" already capitalised.
+    final isRaw = kind.toLowerCase().startsWith('raw');
+    final colour = isRaw ? scheme.onSurfaceVariant : scheme.primary;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: scheme.tintOf(colour),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        kind,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: colour,
+          fontWeight: FontWeight.w700,
+          fontSize: 10,
+        ),
       ),
     );
   }

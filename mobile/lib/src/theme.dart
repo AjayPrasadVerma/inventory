@@ -2,82 +2,109 @@ import 'package:flutter/material.dart';
 
 /// The app's design language, in one place.
 ///
-/// Two things shape every choice here, and both come from MOBILE.md rather than
-/// taste. The app is for the things done **standing up in the shop** — so touch
-/// targets are large, the important numbers are readable at arm's length, and
-/// nothing needs a second hand. And it runs on cheap Android phones, so the look
-/// leans on layout, weight and spacing rather than on shadows, blurs and
-/// gradients, which are what make a list stutter on a weak GPU.
+/// **The colours are the website's**, token for token, from
+/// `frontend/app/globals.css`. Not a coincidence and not laziness: one owner
+/// moves between the two screens all day, and the shop's khata already reads in
+/// three colours — green for what came in, gold for what went out, indigo for
+/// money. Inventing a second palette would mean learning the app twice.
 ///
-/// It is deliberately **not** a copy of the website. The website is already
-/// mobile-responsive; rebuilding it here would add nothing. What a phone is for
-/// is the walking-around work, and that wants a different shape.
+/// What is *not* borrowed is the layout. The website is already
+/// mobile-responsive, so rebuilding it here would add nothing; the phone is for
+/// what gets done **standing up in the shop** (MOBILE.md), which wants larger
+/// targets and fewer things to read.
+///
+/// Two rules follow from the phone rather than the web. Depth comes from colour
+/// and spacing rather than shadows and blurs, which are what make a list stutter
+/// on a cheap Android GPU. And colour is spent, not sprinkled: the three action
+/// blocks are saturated and everything around them stays quiet, because a screen
+/// where everything is a bordered box reads as unfinished — and so does a
+/// rainbow.
 class AppTheme {
   const AppTheme._();
 
-  /// The same blue the website uses. Continuity is worth more than novelty —
-  /// this is one business, and the owner moves between the two all day.
-  static const seed = Color(0xFF2563EB);
-
-  /// One rhythm for every gap in the app. Sizes are multiples of it, so spacing
-  /// stays consistent without anyone having to remember a number.
+  /// One rhythm for every gap. Sizes are multiples of it.
   static const gap = 8.0;
+
+  // ── The website's surfaces (globals.css) ───────────────────────────────
+  static const _lightBg = Color(0xFFF2F4FA); // --surface-2
+  static const _lightSurface = Color(0xFFFFFFFF); // --surface
+  static const _lightInk = Color(0xFF1A1C2E); // --ink
+  static const _lightMuted = Color(0xFF676D8C); // --muted
+  static const _lightBorder = Color(0xFFDFE3EF); // --border
+
+  // The page ground is the website's own surface colour, matched exactly. Rows
+  // then sit on the site's next step up, so they still lift off the ground
+  // without every one of them needing an outline drawn around it.
+  static const _darkBg = Color(0xFF1A1C2B); // --surface
+  static const _darkSurface = Color(0xFF232639); // --surface-2
+  static const _darkInk = Color(0xFFECEDF5); // --ink
+  static const _darkMuted = Color(0xFF979DBA); // --muted
+  static const _darkBorder = Color(0xFF2A2D42); // --border
 
   static ThemeData light() => _base(Brightness.light);
   static ThemeData dark() => _base(Brightness.dark);
 
   static ThemeData _base(Brightness brightness) {
-    final scheme = ColorScheme.fromSeed(
-      seedColor: seed,
-      brightness: brightness,
-    );
     final isDark = brightness == Brightness.dark;
+    final bg = isDark ? _darkBg : _lightBg;
+    final surface = isDark ? _darkSurface : _lightSurface;
+    final ink = isDark ? _darkInk : _lightInk;
+    final muted = isDark ? _darkMuted : _lightMuted;
+    final outline = isDark ? _darkBorder : _lightBorder;
+    // --primary
+    final primary = isDark ? const Color(0xFF4F5AC0) : const Color(0xFF2E3577);
+
+    final scheme =
+        ColorScheme.fromSeed(
+          seedColor: primary,
+          brightness: brightness,
+        ).copyWith(
+          primary: primary,
+          surface: surface,
+          onSurface: ink,
+          onSurfaceVariant: muted,
+          outlineVariant: outline,
+        );
 
     return ThemeData(
       colorScheme: scheme,
-      scaffoldBackgroundColor: isDark
-          ? const Color(0xFF0F1115)
-          : const Color(0xFFF7F8FA),
+      scaffoldBackgroundColor: bg,
       appBarTheme: AppBarTheme(
-        backgroundColor: isDark
-            ? const Color(0xFF0F1115)
-            : const Color(0xFFF7F8FA),
+        backgroundColor: bg,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
         titleTextStyle: TextStyle(
-          color: scheme.onSurface,
+          color: ink,
           fontSize: 22,
-          fontWeight: FontWeight.w600,
-          letterSpacing: -0.3,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.4,
         ),
       ),
       cardTheme: CardThemeData(
-        // Flat with a hairline border rather than elevated. A shadow under every
-        // card costs a real amount of GPU time per frame on a cheap phone, and
-        // buys nothing a border does not already say.
         elevation: 0,
-        color: isDark ? const Color(0xFF171A21) : Colors.white,
+        color: surface,
         surfaceTintColor: Colors.transparent,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(gap * 2),
-          side: BorderSide(
-            color: scheme.outlineVariant.withValues(alpha: isDark ? 0.5 : 1),
-          ),
+          // No outline in dark: the surface already lifts off the background, and
+          // a border on top of that is the "boxes everywhere" look. Light mode
+          // needs one, because white on near-white does not separate itself.
+          side: isDark ? BorderSide.none : BorderSide(color: outline),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: isDark ? const Color(0xFF171A21) : Colors.white,
+        fillColor: surface,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(gap * 1.5),
-          borderSide: BorderSide(color: scheme.outlineVariant),
+          borderSide: BorderSide(color: outline),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(gap * 1.5),
-          borderSide: BorderSide(color: scheme.outlineVariant),
+          borderSide: BorderSide(color: outline),
         ),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: gap * 2,
@@ -101,24 +128,47 @@ class AppTheme {
           borderRadius: BorderRadius.circular(gap * 1.5),
         ),
       ),
-      dividerTheme: DividerThemeData(
-        color: scheme.outlineVariant,
-        space: 1,
-        thickness: 1,
-      ),
+      dividerTheme: DividerThemeData(color: outline, space: 1, thickness: 1),
     );
   }
 }
 
-/// Colours that carry meaning rather than brand: stock that needs attention,
-/// material coming in, material going out, money paid.
+/// The khata colours, straight from the website.
 ///
-/// Kept off [ColorScheme] because they are not theme roles — they mean the same
-/// thing in light and dark, and a reader should not have to guess whether
-/// `tertiary` happened to be the "money" one this week.
+/// `.khata-head-in` is `--success`, `.khata-head-raw` is `--accent` and
+/// `.khata-head-pay` is `--primary` (globals.css). The shop already reads its
+/// ledger in those three, so the app uses the same three for the same meanings.
+///
+/// Each has a light and a dark value — the website's own pair, not one colour
+/// dimmed. A 600-weight green that looks confident on white glows against a
+/// near-black ground, which is why globals.css carries two sets and so does this.
+///
+/// Kept off [ColorScheme] because they are not theme roles. A reader should not
+/// have to work out whether `tertiary` happened to be the "money" one this week.
 extension SemanticColors on ColorScheme {
-  Color get inColor => const Color(0xFF16A34A); // goods received
-  Color get outColor => const Color(0xFFD97706); // material issued
-  Color get payColor => const Color(0xFF7C3AED); // money out
-  Color get warnColor => const Color(0xFFDC2626); // low / oversold
+  bool get _dark => brightness == Brightness.dark;
+
+  /// Goods received from a karigar — the website's `--success`.
+  Color get inColor =>
+      _dark ? const Color(0xFF4FB07F) : const Color(0xFF2E7D5B);
+
+  /// Material issued out to a karigar — `--accent`.
+  Color get outColor =>
+      _dark ? const Color(0xFFD4B15E) : const Color(0xFFA6822E);
+
+  /// Money paid — `--primary`, the same colour as the brand, exactly as on the
+  /// website's khata.
+  Color get payColor =>
+      _dark ? const Color(0xFF4F5AC0) : const Color(0xFF2E3577);
+
+  /// Low or oversold stock — `--danger`.
+  Color get warnColor =>
+      _dark ? const Color(0xFFE0664F) : const Color(0xFFC0442E);
+
+  /// Stock that is merely low rather than oversold — `--warning`.
+  Color get lowColor =>
+      _dark ? const Color(0xFFE0A03A) : const Color(0xFFC9871F);
+
+  /// The wash behind a semantic colour. Dark needs more of it to register at all.
+  Color tintOf(Color c) => c.withValues(alpha: _dark ? 0.20 : 0.12);
 }

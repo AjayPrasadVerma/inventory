@@ -32,7 +32,7 @@ Mitigations, in order of how much they help:
 
 1. Keep every model in one directory, one file per endpoint group. Never parse JSON inline in a widget.
 2. When you change a payload in `backend/src/modules/**`, grep the Dart models in the same commit. Treat it like the existing rule in CLAUDE.md §3 about create-vs-PATCH schemas drifting apart — that has already bitten this repo once.
-3. Write a contract test that hits a running API and decodes into the models. It catches drift at CI time rather than in the shop.
+3. Write a contract test that hits a running API and decodes into the models. It catches drift at CI time rather than in the shop. `backend/tests/activity-feed.test.ts` pins the day-feed payload from the server side, which is half of it.
 
 ---
 
@@ -201,10 +201,10 @@ Nothing outside `lib/src/models/` may call `jsonDecode` on an API reply. That is
 
 ### What is NOT done
 
-- **The screens.** `HomeScreen` is a placeholder that proves the session survived and an authenticated call reached the API. Dashboard, karigar IN / OUT / Pay and stock lookup are step 4, and that is where the design work belongs.
+- **Recording anything.** IN, OUT and PAY sit on the dashboard and say so when tapped; the forms behind them are the next screens, along with stock lookup.
 - **No contract test against a running API** — mitigation 3 above. The model tests pin today's payload shape by hand, which catches a rename only if someone updates the fixture; a test that logs into a real API would catch it on its own.
 - No router. One screen decides the other; adding a router before there is somewhere to route would be guessing.
-- Never built or run in **release** mode, so nothing is known about real performance yet.
+- **Nothing is cached on disk.** A cold start shows skeletons until the API answers. Riverpod holds the data while the app is alive, which is not the same as the cache-first rule surviving a restart.
 - **iOS untouched** — the platform folder exists, nothing more.
 
 ### What HAS been verified on a real phone
@@ -227,6 +227,6 @@ This is not a problem, it is just sequencing: the Flutter code is the same for b
 1. ~~Refresh tokens on the API~~ — **done**, contract above.
 2. ~~Teach the web frontend to refresh, then shorten the access token to 15m~~ — **done**. One server-side step remains: drop `JWT_EXPIRES_IN` from `/opt/inventory/.env.api` so production stops overriding the new default.
 3. ~~Flutter project skeleton~~ — **done**, structure above, and verified by signing in on a real phone. The three Android traps it uncovered are written up under "Flutter toolchain".
-4. Dashboard, then karigar IN/OUT/Pay, then stock lookup.
+4. ~~Dashboard~~ — **done**: the day feed with a date picker, an entry detail page, and what needs restocking. Next: the karigar IN / OUT / Pay forms, then stock lookup.
 
 Each of those is a normal PR onto `claude/features` — and remember that merging to `master` deploys the website. A mobile-only change still goes through the same pipeline, so keep the PR green.
