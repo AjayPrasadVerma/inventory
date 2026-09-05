@@ -3,7 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'features/auth/auth_controller.dart';
 import 'features/auth/login_screen.dart';
-import 'features/home/home_screen.dart';
+import 'features/dashboard/dashboard_screen.dart';
+import 'theme.dart';
 
 /// One decision, in one place: who is signed in decides what is on screen.
 ///
@@ -19,15 +20,8 @@ class AcronixApp extends ConsumerWidget {
     return MaterialApp(
       title: 'Acronix Inventory',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2563EB)),
-      ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2563EB),
-          brightness: Brightness.dark,
-        ),
-      ),
+      theme: AppTheme.light(),
+      darkTheme: AppTheme.dark(),
       home: auth.when(
         // The first frame is the session being restored, which needs a network
         // round trip on a slow link. A spinner is honest here; a login screen
@@ -38,7 +32,7 @@ class AcronixApp extends ConsumerWidget {
           onRetry: () => ref.invalidate(authControllerProvider),
         ),
         data: (user) =>
-            user == null ? const LoginScreen() : HomeScreen(user: user),
+            user == null ? const LoginScreen() : DashboardScreen(user: user),
       ),
     );
   }
