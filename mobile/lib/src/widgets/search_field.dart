@@ -126,16 +126,20 @@ class _SearchFieldState<T> extends State<SearchField<T>> {
     }
   }
 
+  // Closed before the callback, not after. Closing drops this field's focus, so
+  // running it second would undo a caller that moved focus on to the next box —
+  // which is what every one of these does, because a name is never the last
+  // thing being filled in.
   void _accept(T value) {
-    widget.onPicked(value);
     _close();
+    widget.onPicked(value);
   }
 
   void _acceptNew() {
     final typed = _controller.text.trim();
     if (typed.isEmpty) return;
-    widget.onPickedNew!(typed);
     _close();
+    widget.onPickedNew!(typed);
   }
 
   @override

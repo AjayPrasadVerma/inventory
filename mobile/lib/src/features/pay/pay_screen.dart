@@ -83,7 +83,13 @@ class _PayScreenState extends ConsumerState<PayScreen> {
                   // there is nothing sensible to create from this screen.
                   onPickedNew: null,
                   emptyPrompt: 'Start typing a name',
-                  onPicked: _draft.pickParty,
+                  onPicked: (p) {
+                    _draft.pickParty(p);
+                    // The amount is always the next thing typed, and picking a
+                    // name closes the keyboard on its way out. Without this the
+                    // first digits go nowhere.
+                    _amountFocus.requestFocus();
+                  },
                 ),
 
                 _Label('Amount'),
@@ -94,7 +100,6 @@ class _PayScreenState extends ConsumerState<PayScreen> {
                   child: TextField(
                     controller: _amount,
                     focusNode: _amountFocus,
-                    autofocus: draft.party != null,
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
@@ -108,9 +113,25 @@ class _PayScreenState extends ConsumerState<PayScreen> {
                       fontWeight: FontWeight.w700,
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
-                    decoration: const InputDecoration(
-                      prefixText: '₹  ',
+                    // A leading widget rather than `prefixText`, which Material
+                    // only paints once the field has focus — leaving the field
+                    // reading "4500" with no sign of what the number is.
+                    decoration: InputDecoration(
                       hintText: '0',
+                      prefixIcon: Padding(
+                        padding: const EdgeInsets.only(
+                          left: AppTheme.gap * 2,
+                          right: AppTheme.gap,
+                        ),
+                        child: Text(
+                          '₹',
+                          style: theme.textTheme.headlineSmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      prefixIconConstraints: const BoxConstraints(minWidth: 0),
                     ),
                   ),
                 ),
