@@ -7,6 +7,7 @@ import '../../theme.dart';
 import '../auth/auth_controller.dart';
 import '../entry/entry_controller.dart';
 import '../entry/entry_screen.dart';
+import '../pay/pay_screen.dart';
 import 'activity_controller.dart';
 import 'dashboard_controller.dart';
 import 'widgets/attention_list.dart';
@@ -111,7 +112,8 @@ class DashboardScreen extends ConsumerWidget {
     );
   }
 
-  /// IN and OUT open the entry form; PAY is still to come.
+  /// Each of the three opens its own form and, on a save, brings the screen back
+  /// into step with what just changed.
   Future<void> _act(
     BuildContext context,
     WidgetRef ref,
@@ -122,22 +124,19 @@ class DashboardScreen extends ConsumerWidget {
       QuickAction.materialOut => EntryDirection.materialOut,
       QuickAction.pay => null,
     };
-    if (direction == null) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(content: Text('PAY is the next screen to be built.')),
-        );
-      return;
-    }
 
     final saved = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => EntryScreen(direction: direction)),
+      MaterialPageRoute(
+        builder: (_) => direction == null
+            ? const PayScreen()
+            : EntryScreen(direction: direction),
+      ),
     );
     if (saved != true || !context.mounted) return;
 
     // Both halves of the screen change when an entry is saved — the feed gains a
-    // row and the stock behind "needs attention" has moved — so both refresh.
+    // row and the stock behind "needs attention" has moved — so both refresh. A
+    // payment moves no stock, but it is a row in the same feed.
     await Future.wait([
       ref.read(dashboardProvider.notifier).refresh(),
       ref.read(activityProvider.notifier).refresh(),
@@ -147,11 +146,11 @@ class DashboardScreen extends ConsumerWidget {
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          content: Text(
-            direction == EntryDirection.materialOut
-                ? 'Material issued'
-                : 'Goods received',
-          ),
+          content: Text(switch (action) {
+            QuickAction.materialOut => 'Material issued',
+            QuickAction.materialIn => 'Goods received',
+            QuickAction.pay => 'Payment recorded',
+          }),
         ),
       );
   }

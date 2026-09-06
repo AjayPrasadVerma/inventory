@@ -33,9 +33,31 @@ const SORTABLE: Record<string, string> = {
 
 export const vendorsRepo = {
   /** Lightweight picker options — id/name/phone/city, no balance subqueries. */
-  async options(): Promise<{ id: number; name: string; phone: string | null; city: string | null }[]> {
+  /**
+   * Picker options — bounded, and searchable by name or phone.
+   *
+   * The same shape as `karigarsRepo.options`, for the same reason: every form
+   * that pays or buys from someone opens by asking for this, and an unbounded
+   * select is a table scan sent down the wire once the shop has a few thousand
+   * suppliers. Callers wanting a whole list still get one; they just cannot ask
+   * for an unbounded one.
+   */
+  async options(
+    opts: { q?: string; limit?: number } = {},
+  ): Promise<{ id: number; name: string; phone: string | null; city: string | null }[]> {
+    const params: unknown[] = [];
+    let whereSql = 'WHERE is_active = TRUE';
+    const q = opts.q?.trim();
+    if (q) {
+      params.push(likeTerm(q));
+      whereSql +=
+        ` AND (name ILIKE '%' || $1 || '%' ESCAPE '\\' OR phone ILIKE '%' || $1 || '%' ESCAPE '\\')`;
+    }
+    params.push(opts.limit ?? 500);
     const { rows } = await query<{ id: number; name: string; phone: string | null; city: string | null }>(
-      `SELECT id, name, phone, city FROM vendors WHERE is_active = TRUE ORDER BY name`,
+      `SELECT id, name, phone, city FROM vendors ${whereSql}
+       ORDER BY name LIMIT $${params.length}`,
+      params,
     );
     return rows;
   },

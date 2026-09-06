@@ -7,7 +7,7 @@ import '../../format.dart' as fmt;
 import '../../models/karigar.dart';
 import '../../theme.dart';
 import 'entry_controller.dart';
-import 'widgets/search_field.dart';
+import '../../widgets/search_field.dart';
 
 /// Recording material going out to a karigar, or goods coming back in.
 ///
@@ -116,31 +116,32 @@ class _EntryScreenState extends ConsumerState<EntryScreen> {
 
   /// Karigars come down once and are filtered here; the item catalogue is far
   /// too large for that and is searched on the server.
-  Future<List<String>> _searchKarigars(String q) async {
+  Future<List<KarigarOption>> _searchKarigars(String q) async {
     final all = await ref.read(karigarOptionsProvider.future);
     final term = q.toLowerCase();
+    if (term.isEmpty) return all;
     return all
         .where(
           (k) =>
-              term.isEmpty ||
               k.name.toLowerCase().contains(term) ||
               (k.phone ?? '').contains(term),
         )
-        .map((k) => k.name)
         .toList(growable: false);
   }
 
-  Future<List<String>> _searchItems(String q) async {
-    final found = await ref
-        .read(entryCatalogueProvider)
-        .searchItems(widget.direction, q);
-    _lastItemSearch = found;
-    return found.map((s) => s.name).toList(growable: false);
-  }
+  Future<List<ItemSuggestion>> _searchItems(String q) =>
+      ref.read(entryCatalogueProvider).searchItems(widget.direction, q);
 
-  /// The last search's full rows, so picking a name keeps the sizes and colours
-  /// that came down with it instead of asking for them again.
-  List<ItemSuggestion> _lastItemSearch = const [];
+  /// What an item has been recorded in before, under its name in the list — the
+  /// difference between two similar names is usually the unit they come in.
+  String? _itemSubtitle(ItemSuggestion s) {
+    final parts = [
+      if (s.sizes.isNotEmpty) s.sizes.join(', '),
+      if (s.designs.isNotEmpty)
+        '${s.designs.length} ${s.designs.length == 1 ? 'colour' : 'colours'}',
+    ];
+    return parts.isEmpty ? null : parts.join(' · ');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -179,22 +180,20 @@ class _EntryScreenState extends ConsumerState<EntryScreen> {
               children: [
                 _Field(
                   label: 'Karigar',
-                  child: SearchField(
+                  child: SearchField<KarigarOption>(
                     label: 'karigar',
                     value: draft.karigarName,
                     hint: 'Search by name or phone',
                     tone: scheme.primary,
                     search: _searchKarigars,
+                    labelOf: (k) => k.name,
+                    subtitleOf: (k) => k.phone,
                     // A karigar has to exist as an account before goods can be
                     // booked against them, so this is the one field that cannot
                     // create what it does not find.
                     onPickedNew: null,
                     emptyPrompt: 'Start typing a name',
-                    onPicked: (name) async {
-                      final all = await ref.read(karigarOptionsProvider.future);
-                      final k = all.where((x) => x.name == name);
-                      if (k.isNotEmpty) _draft.pickKarigar(k.first);
-                    },
+                    onPicked: _draft.pickKarigar,
                   ),
                 ),
 
@@ -203,7 +202,7 @@ class _EntryScreenState extends ConsumerState<EntryScreen> {
                   label: direction == EntryDirection.materialOut
                       ? 'Material'
                       : 'Item',
-                  child: SearchField(
+                  child: SearchField<ItemSuggestion>(
                     label: direction == EntryDirection.materialOut
                         ? 'material'
                         : 'item',
@@ -213,13 +212,10 @@ class _EntryScreenState extends ConsumerState<EntryScreen> {
                         : 'Search item — Ring Box, Tray…',
                     tone: tone,
                     search: _searchItems,
-                    onPicked: (name) {
-                      final s = _lastItemSearch.where((x) => x.name == name);
-                      if (s.isEmpty) {
-                        _draft.pickNewItem(name);
-                      } else {
-                        _draft.pickItem(s.first);
-                      }
+                    labelOf: (s) => s.name,
+                    subtitleOf: _itemSubtitle,
+                    onPicked: (s) {
+                      _draft.pickItem(s);
                       setState(_design.clear);
                     },
                     onPickedNew: (name) {

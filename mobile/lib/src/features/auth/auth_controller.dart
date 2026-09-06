@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 
 import '../../api/api_client.dart';
 import '../../api/api_exception.dart';
@@ -8,15 +9,43 @@ import '../../models/auth.dart';
 
 final tokenStoreProvider = Provider<TokenStore>((ref) => SecureTokenStore());
 
+/// Bumped by the client when refreshing was tried and the session is over.
+///
+/// The client cannot call the controller directly. The controller reaches the
+/// client on the way *down* — `build()` watches it to ask who is signed in — so
+/// a client that reads the controller back closes a loop, and Riverpod refuses
+/// it. That is not theoretical: a launch holding a refresh token the server has
+/// already dropped hits exactly this path, and the app opened on
+/// `CircularDependencyError` instead of the login screen.
+///
+/// A counter breaks it. The client only ever writes here, the controller only
+/// ever reads, and the dependency runs one way again.
+final sessionEndedProvider = NotifierProvider<SessionEnded, int>(
+  SessionEnded.new,
+);
+
+class SessionEnded extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  void raise() => state = state + 1;
+}
+
+/// The socket underneath the client, as its own provider so a test can hand the
+/// app a scripted one and exercise the real wiring above it rather than a copy
+/// of it. [ApiClient] leaves a client it was given open, so this owns the close.
+final httpClientProvider = Provider<http.Client>((ref) {
+  final client = http.Client();
+  ref.onDispose(client.close);
+  return client;
+});
+
 final apiClientProvider = Provider<ApiClient>((ref) {
   final client = ApiClient(
     baseUrl: AppConfig.apiBaseUrl,
     tokens: ref.watch(tokenStoreProvider),
-    // Reached when refreshing was tried and the session is over anyway. Read
-    // lazily — by the time this fires both providers exist, so there is no cycle
-    // between the client and the controller that uses it.
-    onSessionEnded: () =>
-        ref.read(authControllerProvider.notifier).forgetSession(),
+    httpClient: ref.watch(httpClientProvider),
+    onSessionEnded: () => ref.read(sessionEndedProvider.notifier).raise(),
   );
   ref.onDispose(client.close);
   return client;
@@ -37,17 +66,34 @@ class AuthController extends AsyncNotifier<AuthUser?> {
   /// the API grew refresh tokens.
   @override
   Future<AuthUser?> build() async {
-    final tokens = ref.watch(tokenStoreProvider);
-    if (await tokens.refreshToken() == null) return null;
+    // Listened to rather than watched, and ignored until this build has settled.
+    //
+    // A raise *during* this build needs no action: the 401 that caused it is
+    // about to make this build return null on its own, which is the sign-out.
+    // Reacting anyway would invalidate a build that is still running, and its
+    // future then never resolves — the app would sit on a spinner forever.
+    // After it has settled, a raise is the session dying under a signed-in user,
+    // and that does need another pass.
+    var building = true;
+    ref.listen(sessionEndedProvider, (_, _) {
+      if (!building) ref.invalidateSelf();
+    });
 
     try {
-      final body = await ref.watch(apiClientProvider).get('/auth/me');
-      return AuthUser.fromJson(
-        body['user'] as Map<String, dynamic>? ?? const {},
-      );
-    } on ApiException catch (err) {
-      if (err.isUnauthorized) return null;
-      rethrow; // a network failure is worth showing, not a silent sign-out
+      final tokens = ref.watch(tokenStoreProvider);
+      if (await tokens.refreshToken() == null) return null;
+
+      try {
+        final body = await ref.watch(apiClientProvider).get('/auth/me');
+        return AuthUser.fromJson(
+          body['user'] as Map<String, dynamic>? ?? const {},
+        );
+      } on ApiException catch (err) {
+        if (err.isUnauthorized) return null;
+        rethrow; // a network failure is worth showing, not a silent sign-out
+      }
+    } finally {
+      building = false;
     }
   }
 
@@ -91,14 +137,5 @@ class AuthController extends AsyncNotifier<AuthUser?> {
     }
     await tokens.clear();
     state = const AsyncValue.data(null);
-  }
-
-  /// The session ended underneath us — the owner removed this user, or a refresh
-  /// token was replayed and the API ended every session. Tokens are already
-  /// cleared by the client; this is only the app catching up.
-  void forgetSession() {
-    if (state.value != null || state.hasError) {
-      state = const AsyncValue.data(null);
-    }
   }
 }
