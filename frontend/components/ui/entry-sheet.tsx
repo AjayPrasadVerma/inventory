@@ -32,6 +32,9 @@ export interface SheetColumn {
   placeholder?: string;
   /** Offer these, but never restrict to them — a new value is just typed. */
   options?: (row: SheetRow) => string[];
+  /** What was typed into this column, as it is typed. A column whose options come
+   *  from a catalogue too large to hold uses this to go and search for them. */
+  onType?: (value: string) => void;
   /** Digits and a single decimal point only. */
   numeric?: boolean;
   /** Derived and read-only, e.g. an amount from qty × rate. */
@@ -210,12 +213,19 @@ export function EntrySheet({
                         data-sheet-first={c.field === firstField ? idx : undefined}
                         onChange={(v) => {
                           patch(row.key, c.field, v);
+                          c.onType?.(v);
                           if (v.trim() && isLast && c.field === firstField) {
                             setRows((ls) => [...ls, makeBlank()]);
                           }
                         }}
                         onEnter={onCellEnter}
-                        onFocus={() => setFocus({ row: idx, field: c.field })}
+                        onFocus={() => {
+                          setFocus({ row: idx, field: c.field });
+                          // Entering a cell is the first chance to go and fetch
+                          // what it should be offering, so a searched column has
+                          // its list ready before the first keystroke.
+                          c.onType?.(value);
+                        }}
                         onBlur={() => setFocus((f) => (f?.row === idx && f.field === c.field ? null : f))}
                         placeholder={idx === 0 ? c.placeholder : ""}
                         ariaLabel={`${c.label} for line ${idx + 1}`}

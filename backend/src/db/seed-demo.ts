@@ -17,8 +17,10 @@
  * Refuses to run against anything but inventory_dev. It writes to every business
  * table, and the one database that must never see that is production.
  *
- * `users` is not touched: the login has to survive.
+ * Of `users` it touches exactly one row — a dev login to open the app with,
+ * printed at the end. Every other account is left alone.
  */
+import bcrypt from 'bcryptjs';
 import 'dotenv/config';
 import { pool, query } from '../config/db.js';
 
@@ -47,6 +49,23 @@ for (const t of [
 ]) {
   await query(`TRUNCATE ${t} RESTART IDENTITY CASCADE`);
 }
+
+// ── A login to test with ────────────────────────────────────────────────
+// Deliberately **outside** the reserved fixture block 9000000000–9000000099.
+// Anything inside it is deleted by users.test.ts and refresh-tokens.test.ts, so
+// a login placed there vanishes the moment the suite runs — which is exactly
+// what happened to the first one of these, mid-session, with no clue why the
+// phone had stopped signing in. CLAUDE.md §4 says as much; this is the rule
+// being followed rather than rediscovered.
+//
+// `npm run seed` makes the real first owner from SEED_OWNER_*. This is only for
+// poking at the app, and only ever exists in inventory_dev.
+const DEV_LOGIN = { name: 'Dev Phone', mobile: '8888888888', password: 'devpass123' };
+await query('DELETE FROM users WHERE mobile = $1', [DEV_LOGIN.mobile]);
+await query(
+  `INSERT INTO users (name, mobile, password_hash, role) VALUES ($1,$2,$3,'owner')`,
+  [DEV_LOGIN.name, DEV_LOGIN.mobile, await bcrypt.hash(DEV_LOGIN.password, 10)],
+);
 
 // ── Catalogue ───────────────────────────────────────────────────────────
 const vendor = await one(
@@ -273,4 +292,5 @@ const summary = await one(`
          (SELECT count(*) FROM purchases WHERE purchase_date = CURRENT_DATE)::int AS purchases_today,
          (SELECT count(*) FROM payments WHERE pay_date = CURRENT_DATE)::int AS payments_today`);
 console.log('seeded inventory_dev:', JSON.stringify(summary));
+console.log(`login: ${DEV_LOGIN.mobile} / ${DEV_LOGIN.password}`);
 await pool.end();

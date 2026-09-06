@@ -66,10 +66,30 @@ export const karigarsRepo = {
     return { rows: rowsRes.rows, total: Number(totalRes.rows[0]?.count ?? 0) };
   },
 
-  /** Lightweight picker options — id/name/phone, no total_paid subquery. */
-  async options(): Promise<{ id: number; name: string; phone: string | null }[]> {
+  /**
+   * Lightweight picker options — id/name/phone, no total_paid subquery.
+   *
+   * Bounded, and searchable by name or phone. It used to select every active
+   * karigar with no limit at all, which is fine at a few hundred and is a table
+   * scan sent down the wire at a few thousand. Callers that want a whole list
+   * still get one; they just cannot ask for an unbounded one.
+   */
+  async options(
+    opts: { q?: string; limit?: number } = {},
+  ): Promise<{ id: number; name: string; phone: string | null }[]> {
+    const params: unknown[] = [];
+    let whereSql = 'WHERE is_active = TRUE';
+    const q = opts.q?.trim();
+    if (q) {
+      params.push(likeTerm(q));
+      whereSql +=
+        ` AND (name ILIKE '%' || $1 || '%' ESCAPE '\\' OR phone ILIKE '%' || $1 || '%' ESCAPE '\\')`;
+    }
+    params.push(opts.limit ?? 500);
     const { rows } = await query<{ id: number; name: string; phone: string | null }>(
-      `SELECT id, name, phone FROM karigars WHERE is_active = TRUE ORDER BY name`,
+      `SELECT id, name, phone FROM karigars ${whereSql}
+       ORDER BY name LIMIT $${params.length}`,
+      params,
     );
     return rows;
   },

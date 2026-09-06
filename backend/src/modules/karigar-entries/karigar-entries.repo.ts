@@ -291,14 +291,23 @@ export const karigarEntriesRepo = {
    * used for a picked name. Direction decides which catalogue is searched, so an
    * OUT form never suggests a finished box.
    */
-  async suggest(direction: Direction, q: string): Promise<{ name: string; sizes: string[]; designs: string[] }[]> {
+  async suggest(
+    direction: Direction,
+    q: string,
+    limit = 20,
+  ): Promise<{ name: string; sizes: string[]; designs: string[] }[]> {
     const table = direction === 'out' ? 'items' : 'products';
     const term = likeTerm(q);
+    // Every name that comes back drags its sizes and its colours with it, and a
+    // bolt of cloth has dozens of colours. Five hundred of those was a payload
+    // nobody reads: the pickers that call this show six matches and ask the
+    // owner to keep typing. The cap is what makes a catalogue of thousands cost
+    // the same as a catalogue of four.
     const names = (await query<{ id: number; name: string }>(
       `SELECT id, name FROM ${table}
        WHERE is_active AND name ILIKE '%' || $1 || '%' ESCAPE '\\'
-       ORDER BY lower(name) LIMIT 500`,
-      [term],
+       ORDER BY lower(name) LIMIT $2`,
+      [term, limit],
     )).rows;
     if (names.length === 0) return [];
 
