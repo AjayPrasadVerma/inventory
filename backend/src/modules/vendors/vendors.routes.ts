@@ -42,9 +42,15 @@ vendorsRouter.get(
 );
 
 // Lightweight picker options for forms/account pages (no balance math).
-vendorsRouter.get('/options', asyncHandler(async (_req, res) => {
+vendorsRouter.get('/options', asyncHandler(async (req, res) => {
+  const q = z
+    .object({
+      q: z.string().trim().max(200).default(''),
+      limit: z.coerce.number().int().min(1).max(1000).default(500),
+    })
+    .parse(req.query);
   res.set('Cache-Control', 'private, max-age=60');
-  res.json({ data: await vendorsRepo.options() });
+  res.json({ data: await vendorsRepo.options({ q: q.q, limit: q.limit }) });
 }));
 
 vendorsRouter.get(

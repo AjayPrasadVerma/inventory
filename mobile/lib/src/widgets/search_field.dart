@@ -2,19 +2,23 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../../../theme.dart';
+import '../theme.dart';
 
-/// One "chosen once" field: the karigar, the item.
+/// One "chosen once" field: the karigar, the item, whoever is being paid.
 ///
-/// Both lists are too long to show — two hundred karigars, thousands of items —
-/// so the field is a box you type into and the matches appear under it, capped
-/// at what fits on a phone without scrolling. That is the same shape the website
-/// uses, and it behaves identically whether the catalogue holds four names or
-/// four thousand.
+/// Every list behind one of these is too long to show — two hundred karigars,
+/// thousands of items — so the field is a box you type into and the matches
+/// appear under it, capped at what fits on a phone without scrolling. That is
+/// the same shape the website uses, and it behaves identically whether the
+/// catalogue holds four names or four thousand.
 ///
 /// Once something is chosen the field collapses to the name, because it is
 /// chosen once and then read thirty-five times.
-class SearchField extends StatefulWidget {
+///
+/// Generic over what is being searched so a row can carry more than a name: the
+/// pay form shows a phone and whether the person is a karigar or a vendor, which
+/// is the only way to tell two Rameshes apart.
+class SearchField<T> extends StatefulWidget {
   const SearchField({
     super.key,
     required this.label,
@@ -22,22 +26,29 @@ class SearchField extends StatefulWidget {
     required this.hint,
     required this.tone,
     required this.search,
+    required this.labelOf,
     required this.onPicked,
+    this.subtitleOf,
     this.onPickedNew,
     this.newHint = 'will be created on save',
     this.emptyPrompt = 'Type to search',
   });
 
   final String label;
+
+  /// What is currently chosen, as text. Null while nothing is.
   final String? value;
   final String hint;
   final Color tone;
 
-  /// Runs on every settled keystroke. Local lists filter in place; the item
-  /// catalogue goes to the server, which is why this is async.
-  final Future<List<String>> Function(String query) search;
+  /// Runs on every settled keystroke. Local lists filter in place; a catalogue
+  /// goes to the server, which is why this is async.
+  final Future<List<T>> Function(String query) search;
 
-  final ValueChanged<String> onPicked;
+  final String Function(T) labelOf;
+  final String? Function(T)? subtitleOf;
+
+  final ValueChanged<T> onPicked;
 
   /// Free text. Null means the value has to come from the list — a karigar has
   /// to exist as an account before goods can be booked against them.
@@ -47,17 +58,17 @@ class SearchField extends StatefulWidget {
   final String emptyPrompt;
 
   @override
-  State<SearchField> createState() => _SearchFieldState();
+  State<SearchField<T>> createState() => _SearchFieldState<T>();
 }
 
-class _SearchFieldState extends State<SearchField> {
+class _SearchFieldState<T> extends State<SearchField<T>> {
   final _controller = TextEditingController();
   final _focus = FocusNode();
 
   Timer? _debounce;
   bool _open = false;
   bool _loading = false;
-  List<String> _matches = const [];
+  List<T> _matches = const [];
 
   /// Guards against a slow response for an old query landing after a fast one
   /// for a newer query and overwriting it.
@@ -115,7 +126,7 @@ class _SearchFieldState extends State<SearchField> {
     }
   }
 
-  void _accept(String value) {
+  void _accept(T value) {
     widget.onPicked(value);
     _close();
   }
@@ -128,10 +139,8 @@ class _SearchFieldState extends State<SearchField> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    if (!_open) return _closed(context);
-    return _searching(context);
-  }
+  Widget build(BuildContext context) =>
+      _open ? _searching(context) : _closed(context);
 
   /// The resting state: the name, and a way back to the search.
   Widget _closed(BuildContext context) {
@@ -208,7 +217,9 @@ class _SearchFieldState extends State<SearchField> {
     final canCreate =
         widget.onPickedNew != null &&
         typed.isNotEmpty &&
-        !_matches.any((m) => m.toLowerCase() == typed.toLowerCase());
+        !_matches.any(
+          (m) => widget.labelOf(m).toLowerCase() == typed.toLowerCase(),
+        );
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: AppTheme.gap * 2),
@@ -271,16 +282,12 @@ class _SearchFieldState extends State<SearchField> {
                     ),
                   ),
                 for (final m in shown)
-                  ListTile(
-                    dense: true,
-                    title: _Highlighted(
-                      text: m,
-                      term: typed,
-                      tone: widget.tone,
-                    ),
-                    trailing: m == widget.value
-                        ? Icon(Icons.check_rounded, color: widget.tone)
-                        : null,
+                  _MatchTile(
+                    label: widget.labelOf(m),
+                    subtitle: widget.subtitleOf?.call(m),
+                    term: typed,
+                    tone: widget.tone,
+                    chosen: widget.labelOf(m) == widget.value,
                     onTap: () => _accept(m),
                   ),
                 if (canCreate)
@@ -314,6 +321,33 @@ class _SearchFieldState extends State<SearchField> {
       ),
     );
   }
+}
+
+class _MatchTile extends StatelessWidget {
+  const _MatchTile({
+    required this.label,
+    required this.subtitle,
+    required this.term,
+    required this.tone,
+    required this.chosen,
+    required this.onTap,
+  });
+
+  final String label;
+  final String? subtitle;
+  final String term;
+  final Color tone;
+  final bool chosen;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+    dense: true,
+    title: _Highlighted(text: label, term: term, tone: tone),
+    subtitle: (subtitle == null || subtitle!.isEmpty) ? null : Text(subtitle!),
+    trailing: chosen ? Icon(Icons.check_rounded, color: tone) : null,
+    onTap: onTap,
+  );
 }
 
 /// The typed part of a match, in the field's own colour. With six near-identical
